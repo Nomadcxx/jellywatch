@@ -37,6 +37,10 @@ type Organizer struct {
 	transferer     transfer.Transferer
 	timeout        time.Duration
 	checksumVerify bool
+	targetUID      int
+	targetGID      int
+	fileMode       os.FileMode
+	dirMode        os.FileMode
 }
 
 func NewOrganizer(libraries []string, options ...func(*Organizer)) *Organizer {
@@ -53,6 +57,10 @@ func NewOrganizer(libraries []string, options ...func(*Organizer)) *Organizer {
 		transferer:     transferer,
 		timeout:        5 * time.Minute,
 		checksumVerify: false,
+		targetUID:      -1,
+		targetGID:      -1,
+		fileMode:       0,
+		dirMode:        0,
 	}
 
 	for _, opt := range options {
@@ -105,6 +113,53 @@ func WithForceOverwrite(force bool) func(*Organizer) {
 	}
 }
 
+func WithPermissions(uid, gid int, fileMode, dirMode os.FileMode) func(*Organizer) {
+	return func(o *Organizer) {
+		o.targetUID = uid
+		o.targetGID = gid
+		o.fileMode = fileMode
+		o.dirMode = dirMode
+	}
+}
+
+func (o *Organizer) buildTransferOptions() transfer.TransferOptions {
+	return transfer.TransferOptions{
+		Timeout:       o.timeout,
+		Checksum:      o.checksumVerify,
+		RetryAttempts: 3,
+		RetryDelay:    5 * time.Second,
+		PreserveAttrs: true,
+		TargetUID:     o.targetUID,
+		TargetGID:     o.targetGID,
+		FileMode:      o.fileMode,
+		DirMode:       o.dirMode,
+	}
+}
+
+func (o *Organizer) applyDirOwnership(path string) error {
+	if o.dirMode != 0 {
+		if err := os.Chmod(path, o.dirMode); err != nil {
+			return err
+		}
+	}
+	if o.targetUID >= 0 || o.targetGID >= 0 {
+		uid, gid := o.targetUID, o.targetGID
+		if uid < 0 {
+			uid = -1
+		}
+		if gid < 0 {
+			gid = -1
+		}
+		if err := os.Chown(path, uid, gid); err != nil {
+			if os.Geteuid() != 0 {
+				return nil
+			}
+			return err
+		}
+	}
+	return nil
+}
+
 // OrganizeMovie organizes a movie file according to Jellyfin standards
 func (o *Organizer) OrganizeMovie(sourcePath, libraryPath string) (*OrganizationResult, error) {
 	filename := filepath.Base(sourcePath)
@@ -150,6 +205,16 @@ func (o *Organizer) OrganizeMovie(sourcePath, libraryPath string) (*Organization
 		}, nil
 	}
 
+	if err := o.applyDirOwnership(movieDir); err != nil {
+		return &OrganizationResult{
+			Success:       false,
+			SourcePath:    sourcePath,
+			TargetPath:    targetPath,
+			SourceQuality: sourceQuality,
+			Error:         fmt.Errorf("unable to set directory permissions: %w", err),
+		}, nil
+	}
+
 	if o.dryRun {
 		return &OrganizationResult{
 			Success:         true,
@@ -164,13 +229,7 @@ func (o *Organizer) OrganizeMovie(sourcePath, libraryPath string) (*Organization
 		os.Remove(existingFile)
 	}
 
-	opts := transfer.TransferOptions{
-		Timeout:       o.timeout,
-		Checksum:      o.checksumVerify,
-		RetryAttempts: 3,
-		RetryDelay:    5 * time.Second,
-		PreserveAttrs: true,
-	}
+	opts := o.buildTransferOptions()
 
 	var result *transfer.TransferResult
 	if o.keepSource {
@@ -257,6 +316,25 @@ func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*Organiza
 		}, nil
 	}
 
+	if err := o.applyDirOwnership(showDir); err != nil {
+		return &OrganizationResult{
+			Success:       false,
+			SourcePath:    sourcePath,
+			TargetPath:    targetPath,
+			SourceQuality: sourceQuality,
+			Error:         fmt.Errorf("unable to set show directory permissions: %w", err),
+		}, nil
+	}
+	if err := o.applyDirOwnership(seasonDir); err != nil {
+		return &OrganizationResult{
+			Success:       false,
+			SourcePath:    sourcePath,
+			TargetPath:    targetPath,
+			SourceQuality: sourceQuality,
+			Error:         fmt.Errorf("unable to set season directory permissions: %w", err),
+		}, nil
+	}
+
 	if o.dryRun {
 		return &OrganizationResult{
 			Success:         true,
@@ -271,13 +349,7 @@ func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*Organiza
 		os.Remove(existingFile)
 	}
 
-	opts := transfer.TransferOptions{
-		Timeout:       o.timeout,
-		Checksum:      o.checksumVerify,
-		RetryAttempts: 3,
-		RetryDelay:    5 * time.Second,
-		PreserveAttrs: true,
-	}
+	opts := o.buildTransferOptions()
 
 	var result *transfer.TransferResult
 	if o.keepSource {
@@ -497,6 +569,9 @@ func (o *Organizer) copySubtitles(analysis *analyzer.FolderAnalysis, targetDir s
 		opts := transfer.TransferOptions{
 			Timeout:       30 * time.Second,
 			RetryAttempts: 2,
+			TargetUID:     o.targetUID,
+			TargetGID:     o.targetGID,
+			FileMode:      o.fileMode,
 		}
 		_, err := o.transferer.Copy(sub.Path, targetPath, opts)
 		if err == nil {

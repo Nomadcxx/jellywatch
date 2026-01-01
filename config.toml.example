@@ -38,3 +38,13 @@ enabled = false
 url = "http://localhost:7878"
 api_key = ""
 notify_on_import = true
+
+# File permissions (optional)
+# Set ownership and permissions for transferred files.
+# Useful when Jellyfin runs as a different user than the download client.
+# Leave user/group empty to preserve source ownership.
+[permissions]
+# user = "jellyfin"      # Username or numeric UID
+# group = "jellyfin"     # Group name or numeric GID
+# file_mode = "0644"     # File permissions (rw-r--r--)
+# dir_mode = "0755"      # Directory permissions (rwxr-xr-x)

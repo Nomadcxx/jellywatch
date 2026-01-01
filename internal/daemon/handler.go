@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -96,6 +97,10 @@ type MediaHandlerConfig struct {
 	Backend       transfer.Backend
 	NotifyManager *notify.Manager
 	Logger        *logging.Logger
+	TargetUID     int
+	TargetGID     int
+	FileMode      os.FileMode
+	DirMode       os.FileMode
 }
 
 func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
@@ -110,12 +115,15 @@ func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
 	}
 
 	allLibs := append(cfg.TVLibraries, cfg.MovieLibs...)
-	org := organizer.NewOrganizer(
-		allLibs,
+	orgOpts := []func(*organizer.Organizer){
 		organizer.WithDryRun(cfg.DryRun),
 		organizer.WithTimeout(cfg.Timeout),
 		organizer.WithBackend(cfg.Backend),
-	)
+	}
+	if cfg.TargetUID >= 0 || cfg.TargetGID >= 0 || cfg.FileMode != 0 || cfg.DirMode != 0 {
+		orgOpts = append(orgOpts, organizer.WithPermissions(cfg.TargetUID, cfg.TargetGID, cfg.FileMode, cfg.DirMode))
+	}
+	org := organizer.NewOrganizer(allLibs, orgOpts...)
 
 	return &MediaHandler{
 		organizer:     org,

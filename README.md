@@ -20,6 +20,7 @@ curl -sSL https://raw.githubusercontent.com/Nomadcxx/jellywatch/main/install.sh 
 - **Compliance Validation**: Ensures all files follow Jellyfin naming conventions
 - **Daemon Support**: Runs as a background service with systemd integration
 - **Dry Run Mode**: Preview changes before applying them
+- **File Permissions**: Automatically set ownership and permissions for Jellyfin access
 
 ## Naming Conventions
 
@@ -136,6 +137,24 @@ dry_run = false
 verify_checksums = false
 delete_source = true
 ```
+
+### File Permissions
+
+If Jellyfin runs as a different user than your download client, configure permissions to ensure Jellyfin can access transferred files:
+
+```toml
+[permissions]
+user = "jellyfin"      # Username or numeric UID
+group = "jellyfin"     # Group name or numeric GID
+file_mode = "0644"     # File permissions (rw-r--r--)
+dir_mode = "0755"      # Directory permissions (rwxr-xr-x)
+```
+
+**Notes:**
+- Leave `user`/`group` empty to preserve source file ownership
+- The daemon must run as root (or have `CAP_CHOWN`) to change ownership
+- Non-root processes will silently skip ownership changes but still apply mode changes
+- Uses rsync's `--chown` and `--chmod` flags for efficient permission handling
 
 ## Daemon Service
 

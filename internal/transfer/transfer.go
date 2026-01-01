@@ -10,6 +10,7 @@ package transfer
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 )
@@ -65,6 +66,22 @@ type TransferOptions struct {
 	// DeletePartial removes partial files if transfer fails.
 	// If false, partial files are left for potential resumption.
 	DeletePartial bool
+
+	// TargetUID sets the owner of transferred files. A value of -1 means
+	// preserve source ownership (or process owner if PreserveAttrs is false).
+	TargetUID int
+
+	// TargetGID sets the group of transferred files. A value of -1 means
+	// preserve source group (or process group if PreserveAttrs is false).
+	TargetGID int
+
+	// FileMode sets the permissions for transferred files. A value of 0 means
+	// preserve source permissions (or use umask default if PreserveAttrs is false).
+	FileMode os.FileMode
+
+	// DirMode sets the permissions for created directories. A value of 0 means
+	// use 0755 default.
+	DirMode os.FileMode
 }
 
 // DefaultOptions returns sensible default transfer options.
@@ -77,6 +94,10 @@ func DefaultOptions() TransferOptions {
 		RetryDelay:    5 * time.Second,
 		PreserveAttrs: true,
 		DeletePartial: false,
+		TargetUID:     -1,
+		TargetGID:     -1,
+		FileMode:      0,
+		DirMode:       0,
 	}
 }
 

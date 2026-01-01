@@ -44,6 +44,7 @@ const (
 	stepLibraryPaths
 	stepSonarr
 	stepRadarr
+	stepPermissions
 	stepConfirm
 	stepInstalling
 	stepComplete
@@ -102,6 +103,12 @@ type model struct {
 	radarrVersion   string
 	testingAPI      bool
 	testError       string
+
+	// Permissions configuration
+	permUser     string
+	permGroup    string
+	permFileMode string
+	permDirMode  string
 }
 
 // Task completion message
@@ -295,15 +302,37 @@ func installBinaries(m *model) error {
 	return nil
 }
 
-func createConfig(m *model) error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+func getRealUser() (username, homeDir string, uid, gid int) {
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		username = sudoUser
+		homeDir = "/home/" + sudoUser
+		if sudoUID := os.Getenv("SUDO_UID"); sudoUID != "" {
+			fmt.Sscanf(sudoUID, "%d", &uid)
+		}
+		if sudoGID := os.Getenv("SUDO_GID"); sudoGID != "" {
+			fmt.Sscanf(sudoGID, "%d", &gid)
+		}
+		return
 	}
+	homeDir, _ = os.UserHomeDir()
+	username = os.Getenv("USER")
+	uid = os.Getuid()
+	gid = os.Getgid()
+	return
+}
+
+func createConfig(m *model) error {
+	username, homeDir, uid, gid := getRealUser()
+	_ = username
 
 	configDir := filepath.Join(homeDir, ".config", "jellywatch")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	if uid > 0 && gid > 0 {
+		os.Chown(filepath.Join(homeDir, ".config"), uid, gid)
+		os.Chown(configDir, uid, gid)
 	}
 
 	configPath := filepath.Join(configDir, "config.toml")
@@ -311,6 +340,10 @@ func createConfig(m *model) error {
 	configContent := generateConfig(m)
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
+	}
+
+	if uid > 0 && gid > 0 {
+		os.Chown(configPath, uid, gid)
 	}
 
 	return nil
@@ -373,23 +406,44 @@ func generateConfig(m *model) string {
 	sb.WriteString("verify_checksums = false\n")
 	sb.WriteString("delete_source = true\n")
 
+	if m.permUser != "" || m.permGroup != "" {
+		sb.WriteString("\n[permissions]\n")
+		if m.permUser != "" {
+			sb.WriteString(fmt.Sprintf("user = \"%s\"\n", m.permUser))
+		}
+		if m.permGroup != "" {
+			sb.WriteString(fmt.Sprintf("group = \"%s\"\n", m.permGroup))
+		}
+		if m.permFileMode != "" && m.permFileMode != "0644" {
+			sb.WriteString(fmt.Sprintf("file_mode = \"%s\"\n", m.permFileMode))
+		}
+		if m.permDirMode != "" && m.permDirMode != "0755" {
+			sb.WriteString(fmt.Sprintf("dir_mode = \"%s\"\n", m.permDirMode))
+		}
+	}
+
 	return sb.String()
 }
 
 func installSystemdFiles(m *model) error {
-	serviceContent := `[Unit]
+	username, homeDir, _, _ := getRealUser()
+	configPath := filepath.Join(homeDir, ".config", "jellywatch", "config.toml")
+
+	serviceContent := fmt.Sprintf(`[Unit]
 Description=JellyWatch media file organizer daemon
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/jellywatchd
+User=%s
+Environment="HOME=%s"
+ExecStart=/usr/local/bin/jellywatchd --config "%s"
 Restart=on-failure
 RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
-`
+`, username, homeDir, configPath)
 
 	servicePath := "/etc/systemd/system/jellywatchd.service"
 	if err := os.WriteFile(servicePath, []byte(serviceContent), 0644); err != nil {
@@ -524,6 +578,38 @@ func (m *model) initInputsForStep() {
 		apiInput.SetValue(m.radarrAPIKey)
 
 		m.inputs = []textinput.Model{urlInput, apiInput}
+
+	case stepPermissions:
+		userInput := textinput.New()
+		userInput.Placeholder = "jellyfin (username or UID)"
+		userInput.Focus()
+		userInput.Width = 50
+		userInput.SetValue(m.permUser)
+
+		groupInput := textinput.New()
+		groupInput.Placeholder = "jellyfin (group name or GID)"
+		groupInput.Width = 50
+		groupInput.SetValue(m.permGroup)
+
+		fileModeInput := textinput.New()
+		fileModeInput.Placeholder = "0644"
+		fileModeInput.Width = 20
+		if m.permFileMode == "" {
+			fileModeInput.SetValue("0644")
+		} else {
+			fileModeInput.SetValue(m.permFileMode)
+		}
+
+		dirModeInput := textinput.New()
+		dirModeInput.Placeholder = "0755"
+		dirModeInput.Width = 20
+		if m.permDirMode == "" {
+			dirModeInput.SetValue("0755")
+		} else {
+			dirModeInput.SetValue(m.permDirMode)
+		}
+
+		m.inputs = []textinput.Model{userInput, groupInput, fileModeInput, dirModeInput}
 	}
 }
 
@@ -548,6 +634,13 @@ func (m *model) saveInputsFromStep() {
 		if len(m.inputs) >= 2 {
 			m.radarrURL = strings.TrimSpace(m.inputs[0].Value())
 			m.radarrAPIKey = strings.TrimSpace(m.inputs[1].Value())
+		}
+	case stepPermissions:
+		if len(m.inputs) >= 4 {
+			m.permUser = strings.TrimSpace(m.inputs[0].Value())
+			m.permGroup = strings.TrimSpace(m.inputs[1].Value())
+			m.permFileMode = strings.TrimSpace(m.inputs[2].Value())
+			m.permDirMode = strings.TrimSpace(m.inputs[3].Value())
 		}
 	}
 }
@@ -663,6 +756,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.step == stepRadarr {
 				m.saveInputsFromStep()
 				m.radarrEnabled = len(m.radarrURL) > 0 && len(m.radarrAPIKey) > 0
+				m.step = stepPermissions
+				m.initInputsForStep()
+				return m, nil
+			} else if m.step == stepPermissions {
+				m.saveInputsFromStep()
 				m.step = stepConfirm
 				m.selectedOption = 0
 				return m, nil
@@ -821,6 +919,8 @@ func (m model) View() string {
 		mainContent = m.renderSonarr()
 	case stepRadarr:
 		mainContent = m.renderRadarr()
+	case stepPermissions:
+		mainContent = m.renderPermissions()
 	case stepConfirm:
 		mainContent = m.renderConfirm()
 	case stepInstalling:
@@ -984,6 +1084,36 @@ func (m model) renderRadarr() string {
 	return content
 }
 
+func (m model) renderPermissions() string {
+	var content string
+
+	content += lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("File Permissions (Optional)") + "\n\n"
+	content += "Set ownership and permissions for transferred files.\n"
+	content += lipgloss.NewStyle().Foreground(FgMuted).Render("Configure this if Jellyfin runs as a different user.") + "\n\n"
+
+	content += "Owner User:\n"
+	if len(m.inputs) > 0 {
+		content += m.inputs[0].View() + "\n\n"
+	}
+
+	content += "Owner Group:\n"
+	if len(m.inputs) > 1 {
+		content += m.inputs[1].View() + "\n\n"
+	}
+
+	content += "File Mode:                    Directory Mode:\n"
+	if len(m.inputs) > 2 {
+		content += m.inputs[2].View() + "                       "
+	}
+	if len(m.inputs) > 3 {
+		content += m.inputs[3].View() + "\n\n"
+	}
+
+	content += lipgloss.NewStyle().Foreground(FgMuted).Render("Leave user/group empty to preserve source ownership.") + "\n"
+
+	return content
+}
+
 func (m model) renderConfirm() string {
 	var content string
 
@@ -1026,6 +1156,19 @@ func (m model) renderConfirm() string {
 			status = lipgloss.NewStyle().Foreground(SuccessColor).Render("✓")
 		}
 		content += lipgloss.NewStyle().Foreground(Secondary).Render("Radarr:") + " " + m.radarrURL + " " + status + "\n"
+	}
+
+	if m.permUser != "" || m.permGroup != "" {
+		content += "\n" + lipgloss.NewStyle().Foreground(Secondary).Render("Permissions:") + "\n"
+		if m.permUser != "" {
+			content += "  User:  " + m.permUser + "\n"
+		}
+		if m.permGroup != "" {
+			content += "  Group: " + m.permGroup + "\n"
+		}
+		if m.permFileMode != "" {
+			content += "  Files: " + m.permFileMode + "  Dirs: " + m.permDirMode + "\n"
+		}
 	}
 
 	content += "\n"
@@ -1130,6 +1273,8 @@ func (m model) getHelpText() string {
 		return "↑/↓: Switch field  •  Enter: Continue  •  Esc: Back  •  Q: Quit"
 	case stepSonarr, stepRadarr:
 		return "Tab: Next field  •  T: Test connection  •  Enter: Continue  •  Esc: Back  •  Q: Quit"
+	case stepPermissions:
+		return "↑/↓: Switch field  •  Enter: Continue  •  Esc: Back  •  Q: Quit"
 	case stepConfirm:
 		return "↑/↓: Navigate  •  Enter: Confirm  •  Esc: Back  •  Q: Quit"
 	case stepInstalling:

@@ -77,6 +77,37 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	notifyMgr := notify.NewManager(true)
 
+	var targetUID, targetGID int = -1, -1
+	var fileMode, dirMode os.FileMode
+	if cfg.Permissions.WantsOwnership() {
+		var err error
+		targetUID, err = cfg.Permissions.ResolveUID()
+		if err != nil {
+			return fmt.Errorf("invalid permissions user %q: %w", cfg.Permissions.User, err)
+		}
+		targetGID, err = cfg.Permissions.ResolveGID()
+		if err != nil {
+			return fmt.Errorf("invalid permissions group %q: %w", cfg.Permissions.Group, err)
+		}
+		logger.Info("daemon", "File ownership configured",
+			logging.F("uid", targetUID),
+			logging.F("gid", targetGID))
+	}
+	if cfg.Permissions.WantsMode() {
+		var err error
+		fileMode, err = cfg.Permissions.ParseFileMode()
+		if err != nil {
+			return fmt.Errorf("invalid permissions file_mode %q: %w", cfg.Permissions.FileMode, err)
+		}
+		dirMode, err = cfg.Permissions.ParseDirMode()
+		if err != nil {
+			return fmt.Errorf("invalid permissions dir_mode %q: %w", cfg.Permissions.DirMode, err)
+		}
+		logger.Info("daemon", "File permissions configured",
+			logging.F("file_mode", fmt.Sprintf("%04o", fileMode)),
+			logging.F("dir_mode", fmt.Sprintf("%04o", dirMode)))
+	}
+
 	if cfg.Sonarr.Enabled && cfg.Sonarr.APIKey != "" && cfg.Sonarr.URL != "" {
 		sonarrClient := sonarr.NewClient(sonarr.Config{
 			URL:     cfg.Sonarr.URL,
@@ -106,6 +137,10 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		Backend:       transfer.ParseBackend(backendName),
 		NotifyManager: notifyMgr,
 		Logger:        logger,
+		TargetUID:     targetUID,
+		TargetGID:     targetGID,
+		FileMode:      fileMode,
+		DirMode:       dirMode,
 	})
 
 	healthServer := daemon.NewServer(handler, healthAddr, logger)

@@ -179,6 +179,29 @@ func (r *RsyncTransferer) buildArgs(opts TransferOptions, removeSource bool) []s
 		args = append(args, "--no-owner", "--no-group", "--no-perms")
 	}
 
+	if opts.TargetUID >= 0 || opts.TargetGID >= 0 {
+		uid := opts.TargetUID
+		gid := opts.TargetGID
+		if uid < 0 {
+			uid = 0
+		}
+		if gid < 0 {
+			gid = 0
+		}
+		args = append(args, fmt.Sprintf("--chown=%d:%d", uid, gid))
+	}
+
+	if opts.FileMode != 0 || opts.DirMode != 0 {
+		var chmodParts []string
+		if opts.DirMode != 0 {
+			chmodParts = append(chmodParts, fmt.Sprintf("D%04o", opts.DirMode))
+		}
+		if opts.FileMode != 0 {
+			chmodParts = append(chmodParts, fmt.Sprintf("F%04o", opts.FileMode))
+		}
+		args = append(args, "--chmod="+strings.Join(chmodParts, ","))
+	}
+
 	return args
 }
 
