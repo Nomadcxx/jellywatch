@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Config represents the application configuration
 type Config struct {
 	Watch     WatchConfig     `mapstructure:"watch"`
 	Libraries LibrariesConfig `mapstructure:"libraries"`
@@ -17,6 +16,14 @@ type Config struct {
 	Options   OptionsConfig   `mapstructure:"options"`
 	Sonarr    SonarrConfig    `mapstructure:"sonarr"`
 	Radarr    RadarrConfig    `mapstructure:"radarr"`
+	Logging   LoggingConfig   `mapstructure:"logging"`
+}
+
+type LoggingConfig struct {
+	Level      string `mapstructure:"level"`
+	File       string `mapstructure:"file"`
+	MaxSizeMB  int    `mapstructure:"max_size_mb"`
+	MaxBackups int    `mapstructure:"max_backups"`
 }
 
 // WatchConfig contains directories to watch
@@ -91,6 +98,12 @@ func DefaultConfig() *Config {
 			URL:            "",
 			APIKey:         "",
 			NotifyOnImport: true,
+		},
+		Logging: LoggingConfig{
+			Level:      "info",
+			File:       "",
+			MaxSizeMB:  10,
+			MaxBackups: 5,
 		},
 	}
 }
@@ -226,6 +239,15 @@ verify_checksums = %v
 
 # Delete source file after successful transfer (false = copy instead of move)
 delete_source = %v
+
+# ============================================================================
+# LOGGING
+# ============================================================================
+[logging]
+level = "%s"
+file = "%s"
+max_size_mb = %d
+max_backups = %d
 `,
 		formatStringSlice(c.Watch.TV),
 		formatStringSlice(c.Watch.Movies),
@@ -245,6 +267,10 @@ delete_source = %v
 		c.Options.DryRun,
 		c.Options.VerifyChecksums,
 		c.Options.DeleteSource,
+		c.Logging.Level,
+		c.Logging.File,
+		c.Logging.MaxSizeMB,
+		c.Logging.MaxBackups,
 	)
 }
 

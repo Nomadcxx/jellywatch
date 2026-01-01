@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/daemon"
+	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/notify"
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
@@ -55,6 +55,18 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unable to load config: %w", err)
 	}
 
+	logCfg := logging.Config{
+		Level:      cfg.Logging.Level,
+		File:       cfg.Logging.File,
+		MaxSizeMB:  cfg.Logging.MaxSizeMB,
+		MaxBackups: cfg.Logging.MaxBackups,
+	}
+	logger, err := logging.New(logCfg)
+	if err != nil {
+		return fmt.Errorf("unable to create logger: %w", err)
+	}
+	defer logger.Close()
+
 	var watchPaths []string
 	watchPaths = append(watchPaths, cfg.Watch.Movies...)
 	watchPaths = append(watchPaths, cfg.Watch.TV...)
@@ -72,7 +84,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			Timeout: 30 * time.Second,
 		})
 		notifyMgr.Register(notify.NewSonarrNotifier(sonarrClient, cfg.Sonarr.NotifyOnImport))
-		log.Printf("Sonarr integration enabled: %s", cfg.Sonarr.URL)
+		logger.Info("daemon", "Sonarr integration enabled", logging.F("url", cfg.Sonarr.URL))
 	}
 
 	if cfg.Radarr.Enabled && cfg.Radarr.APIKey != "" && cfg.Radarr.URL != "" {
@@ -82,7 +94,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			Timeout: 30 * time.Second,
 		})
 		notifyMgr.Register(notify.NewRadarrNotifier(radarrClient, cfg.Radarr.NotifyOnImport))
-		log.Printf("Radarr integration enabled: %s", cfg.Radarr.URL)
+		logger.Info("daemon", "Radarr integration enabled", logging.F("url", cfg.Radarr.URL))
 	}
 
 	handler := daemon.NewMediaHandler(daemon.MediaHandlerConfig{
@@ -93,9 +105,10 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		Timeout:       5 * time.Minute,
 		Backend:       transfer.ParseBackend(backendName),
 		NotifyManager: notifyMgr,
+		Logger:        logger,
 	})
 
-	healthServer := daemon.NewServer(handler, healthAddr)
+	healthServer := daemon.NewServer(handler, healthAddr, logger)
 
 	w, err := watcher.NewWatcher(handler, dryRun || cfg.Options.DryRun)
 	if err != nil {
@@ -107,13 +120,15 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unable to watch directories: %w", err)
 	}
 
-	log.Printf("JellyWatchd started")
-	log.Printf("Watching %d directories", len(watchPaths))
-	log.Printf("TV libraries: %v", cfg.Libraries.TV)
-	log.Printf("Movie libraries: %v", cfg.Libraries.Movies)
-	log.Printf("Health server: http://localhost%s/health", healthAddr)
+	logger.Info("daemon", "JellyWatchd started",
+		logging.F("watch_dirs", len(watchPaths)),
+		logging.F("tv_libs", cfg.Libraries.TV),
+		logging.F("movie_libs", cfg.Libraries.Movies),
+		logging.F("health_addr", healthAddr),
+		logging.F("log_file", logger.FilePath()))
+
 	if dryRun || cfg.Options.DryRun {
-		log.Printf("DRY RUN MODE - no files will be moved")
+		logger.Warn("daemon", "DRY RUN MODE - no files will be moved")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -134,7 +149,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	select {
 	case sig := <-sigChan:
-		log.Printf("Received signal: %v, shutting down...", sig)
+		logger.Info("daemon", "Received shutdown signal", logging.F("signal", sig.String()))
 		healthServer.SetHealthy(false)
 
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)

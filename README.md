@@ -1,6 +1,16 @@
-# JellyWatch
+<div align="center">
+  <img src="assets/jellywatch-header.png" alt="JellyWatch" />
+  <p><em>Media file watcher and organizer for Jellyfin libraries</em></p>
+  <p>Automatically monitors download directories and organizes files according to Jellyfin naming standards</p>
+</div>
 
-Media file watcher and organizer for Jellyfin libraries. Automatically monitors download directories and organizes files according to Jellyfin naming standards.
+---
+
+## Quick Install
+
+```bash
+curl -sSL https://raw.githubusercontent.com/Nomadcxx/jellywatch/main/install.sh | sudo bash
+```
 
 ## Features
 
@@ -32,15 +42,50 @@ TV Shows/Show Name (Year)/Season 01/Show Name (Year) S01E01.ext
 
 ## Installation
 
-```bash
-go install ./cmd/jellywatch
-```
-
-Or build locally:
+### Quick Install (Recommended)
 
 ```bash
-go build -o jellywatch ./cmd/jellywatch
+curl -sSL https://raw.githubusercontent.com/Nomadcxx/jellywatch/main/install.sh | sudo bash
 ```
+
+Or download and run manually:
+
+```bash
+wget https://raw.githubusercontent.com/Nomadcxx/jellywatch/main/install.sh
+chmod +x install.sh
+sudo ./install.sh
+```
+
+The installer will:
+- Check for Go installation (1.21+ required)
+- Clone the repository
+- Build the interactive installer
+- Guide you through configuration
+- Install binaries to `/usr/local/bin`
+- Set up systemd service
+- Create config at `~/.config/jellywatch/config.toml`
+
+### Manual Installation
+
+Requirements:
+- Go 1.21 or later
+- Root privileges (for systemd and `/usr/local/bin`)
+
+```bash
+git clone https://github.com/Nomadcxx/jellywatch.git
+cd jellywatch
+go build -o installer ./cmd/installer
+sudo ./installer
+```
+
+### Uninstall
+
+```bash
+sudo jellywatch-installer
+# Select "Uninstall" option
+```
+
+Or run the installer again and choose uninstall mode.
 
 ## Usage
 
@@ -94,19 +139,28 @@ delete_source = true
 
 ## Daemon Service
 
-Install as systemd service:
-
-```bash
-sudo jellywatch daemon install
-sudo systemctl enable jellywatchd
-sudo systemctl start jellywatchd
-```
+The installer automatically sets up the systemd service. To manage it:
 
 Check status:
 
 ```bash
 systemctl status jellywatchd
 journalctl -u jellywatchd -f
+```
+
+Start/stop/restart:
+
+```bash
+sudo systemctl start jellywatchd
+sudo systemctl stop jellywatchd
+sudo systemctl restart jellywatchd
+```
+
+Enable/disable auto-start:
+
+```bash
+sudo systemctl enable jellywatchd
+sudo systemctl disable jellywatchd
 ```
 
 ## Development

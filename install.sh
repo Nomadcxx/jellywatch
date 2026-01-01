@@ -1,44 +1,56 @@
 #!/bin/bash
-
-# Jellywatch Installation Script
-
 set -e
 
-INSTALL_DIR="/usr/local/bin"
-SERVICE_DIR="/etc/systemd/system"
-CONFIG_DIR="/home/$SUDO_USER/.config/jellywatch"
+REPO_URL="https://github.com/Nomadcxx/jellywatch.git"
+INSTALL_DIR="/tmp/jellywatch-install-$$"
 
-echo "Installing jellywatch..."
+echo "JellyWatch Installer"
+echo "===================="
+echo ""
 
-# Check if running as root
 if [ "$EUID" -ne 0 ]; then
-    echo "Please run as root"
+    echo "Error: This installer must be run as root"
+    echo "Please run: sudo $0"
     exit 1
 fi
 
-# Create config directory
-mkdir -p "$CONFIG_DIR"
+if ! command -v go &> /dev/null; then
+    echo "Error: Go is not installed"
+    echo "Please install Go 1.21 or later from https://golang.org/dl/"
+    exit 1
+fi
 
-# Copy binaries
-echo "Copying binaries to $INSTALL_DIR..."
-cp jellywatch "$INSTALL_DIR/"
-cp jellywatchd "$INSTALL_DIR/"
-chmod +x "$INSTALL_DIR/jellywatch"
-chmod +x "$INSTALL_DIR/jellywatchd"
+GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
+REQUIRED_VERSION="1.21"
 
-# Install systemd service
-echo "Installing systemd service..."
-cp systemd/jellywatchd.service "$SERVICE_DIR/"
-sed -i "s/%USERNAME%/$SUDO_USER/g" "$SERVICE_DIR/jellywatchd.service"
-systemctl daemon-reload
+if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$GO_VERSION" | sort -V | head -n1)" != "$REQUIRED_VERSION" ]; then
+    echo "Error: Go version $GO_VERSION is too old"
+    echo "Please install Go $REQUIRED_VERSION or later"
+    exit 1
+fi
+
+if command -v git &> /dev/null; then
+    echo "Cloning repository..."
+    git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+    cd "$INSTALL_DIR"
+else
+    echo "Warning: git not found. Assuming we're already in the repository."
+    INSTALL_DIR="$(pwd)"
+fi
+
+echo "Building installer..."
+go build -o installer ./cmd/installer
 
 echo ""
-echo "Installation complete!"
+echo "Starting interactive installer..."
 echo ""
-echo "Next steps:"
-echo "  1. Configure jellywatch: jellywatch"
-echo "  2. Add watch directories to ~/.config/jellywatch/config.toml"
-echo "  3. Enable daemon: sudo systemctl enable jellywatchd"
-echo "  4. Start daemon: sudo systemctl start jellywatchd"
-echo ""
-echo "For usage, run: jellywatch --help"
+
+./installer
+
+EXIT_CODE=$?
+
+if [ -d "/tmp/jellywatch-install-$$" ]; then
+    rm -rf "$INSTALL_DIR"
+fi
+
+exit $EXIT_CODE

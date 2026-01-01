@@ -1,12 +1,12 @@
 package daemon
 
 import (
-	"log"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/notify"
 	"github.com/Nomadcxx/jellywatch/internal/organizer"
@@ -24,6 +24,7 @@ type MediaHandler struct {
 	mu            sync.Mutex
 	dryRun        bool
 	stats         *Stats
+	logger        *logging.Logger
 }
 
 type Stats struct {
@@ -94,6 +95,7 @@ type MediaHandlerConfig struct {
 	Timeout       time.Duration
 	Backend       transfer.Backend
 	NotifyManager *notify.Manager
+	Logger        *logging.Logger
 }
 
 func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
@@ -102,6 +104,9 @@ func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
 	}
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 5 * time.Minute
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = logging.Nop()
 	}
 
 	allLibs := append(cfg.TVLibraries, cfg.MovieLibs...)
@@ -121,6 +126,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
 		pending:       make(map[string]*time.Timer),
 		dryRun:        cfg.DryRun,
 		stats:         NewStats(),
+		logger:        cfg.Logger,
 	}
 }
 
@@ -154,10 +160,10 @@ func (h *MediaHandler) processFile(path string) {
 	h.mu.Unlock()
 
 	filename := filepath.Base(path)
-	log.Printf("Processing: %s", filename)
+	h.logger.Info("handler", "Processing file", logging.F("filename", filename), logging.F("path", path))
 
 	if h.dryRun {
-		log.Printf("[dry-run] Would process: %s", filename)
+		h.logger.Info("handler", "Dry run - would process", logging.F("filename", filename))
 		return
 	}
 
@@ -168,49 +174,49 @@ func (h *MediaHandler) processFile(path string) {
 
 	if naming.IsTVEpisodeFilename(filename) {
 		if len(h.tvLibraries) == 0 {
-			log.Printf("No TV libraries configured, skipping: %s", filename)
+			h.logger.Warn("handler", "No TV libraries configured, skipping", logging.F("filename", filename))
 			return
 		}
 		targetLib = h.tvLibraries[0]
 		mediaType = notify.MediaTypeTVEpisode
 
 		if !h.checkTargetHealth(targetLib) {
-			log.Printf("Target library unhealthy, skipping: %s", filename)
+			h.logger.Warn("handler", "Target library unhealthy, skipping", logging.F("filename", filename), logging.F("target", targetLib))
 			return
 		}
 
 		result, err = h.organizer.OrganizeTVEpisode(path, targetLib)
 	} else if naming.IsMovieFilename(filename) {
 		if len(h.movieLibs) == 0 {
-			log.Printf("No movie libraries configured, skipping: %s", filename)
+			h.logger.Warn("handler", "No movie libraries configured, skipping", logging.F("filename", filename))
 			return
 		}
 		targetLib = h.movieLibs[0]
 		mediaType = notify.MediaTypeMovie
 
 		if !h.checkTargetHealth(targetLib) {
-			log.Printf("Target library unhealthy, skipping: %s", filename)
+			h.logger.Warn("handler", "Target library unhealthy, skipping", logging.F("filename", filename), logging.F("target", targetLib))
 			return
 		}
 
 		result, err = h.organizer.OrganizeMovie(path, targetLib)
 	} else {
-		log.Printf("Cannot determine media type: %s", filename)
+		h.logger.Warn("handler", "Cannot determine media type", logging.F("filename", filename))
 		return
 	}
 
 	if err != nil {
-		log.Printf("Organization failed for %s: %v", filename, err)
+		h.logger.Error("handler", "Organization failed", err, logging.F("filename", filename))
 		h.stats.RecordError()
 		return
 	}
 
 	if result.Success {
-		log.Printf("Organized: %s -> %s (%.2f MB in %s)",
-			filepath.Base(result.SourcePath),
-			result.TargetPath,
-			float64(result.BytesCopied)/(1024*1024),
-			result.Duration)
+		h.logger.Info("handler", "Organized successfully",
+			logging.F("source", filepath.Base(result.SourcePath)),
+			logging.F("target", result.TargetPath),
+			logging.F("size_mb", float64(result.BytesCopied)/(1024*1024)),
+			logging.F("duration", result.Duration.String()))
 
 		if mediaType == notify.MediaTypeMovie {
 			h.stats.RecordMovie(result.BytesCopied)
@@ -220,9 +226,9 @@ func (h *MediaHandler) processFile(path string) {
 
 		h.sendNotifications(result, mediaType)
 	} else if result.Skipped {
-		log.Printf("Skipped: %s - %s", filename, result.SkipReason)
+		h.logger.Info("handler", "Skipped", logging.F("filename", filename), logging.F("reason", result.SkipReason))
 	} else {
-		log.Printf("Organization failed: %s - %v", filename, result.Error)
+		h.logger.Error("handler", "Organization failed", result.Error, logging.F("filename", filename))
 		h.stats.RecordError()
 	}
 }
@@ -247,7 +253,7 @@ func (h *MediaHandler) sendNotifications(result *organizer.OrganizationResult, m
 func (h *MediaHandler) checkTargetHealth(targetLib string) bool {
 	err := transfer.CheckDiskHealthForTransfer("", targetLib, 5*time.Second, 0)
 	if err != nil {
-		log.Printf("Health check failed for %s: %v", targetLib, err)
+		h.logger.Warn("handler", "Health check failed", logging.F("target", targetLib), logging.F("error", err.Error()))
 		return false
 	}
 	return true

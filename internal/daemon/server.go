@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/Nomadcxx/jellywatch/internal/logging"
 )
 
 type Server struct {
@@ -16,6 +17,7 @@ type Server struct {
 	startTime  time.Time
 	mu         sync.RWMutex
 	healthy    bool
+	logger     *logging.Logger
 }
 
 type HealthResponse struct {
@@ -35,11 +37,15 @@ type MetricsResponse struct {
 	LastProcessed    string  `json:"last_processed,omitempty"`
 }
 
-func NewServer(handler *MediaHandler, addr string) *Server {
+func NewServer(handler *MediaHandler, addr string, logger *logging.Logger) *Server {
+	if logger == nil {
+		logger = logging.Nop()
+	}
 	s := &Server{
 		handler:   handler,
 		startTime: time.Now(),
 		healthy:   true,
+		logger:    logger,
 	}
 
 	mux := http.NewServeMux()
@@ -61,7 +67,7 @@ func NewServer(handler *MediaHandler, addr string) *Server {
 }
 
 func (s *Server) Start() error {
-	log.Printf("Health server starting on %s", s.httpServer.Addr)
+	s.logger.Info("server", "Health server starting", logging.F("addr", s.httpServer.Addr))
 	if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("health server error: %w", err)
 	}

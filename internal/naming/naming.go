@@ -74,6 +74,19 @@ func HasYearInParentheses(filename string) bool {
 func ParseMovieName(filename string) (*MovieInfo, error) {
 	baseName := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
 
+	info, err := parseMovieSimple(baseName)
+	if err != nil {
+		return parseMovieAdvanced(baseName)
+	}
+
+	if IsGarbageTitle(info.Title) {
+		return parseMovieAdvanced(baseName)
+	}
+
+	return info, nil
+}
+
+func parseMovieSimple(baseName string) (*MovieInfo, error) {
 	cleaned := stripReleaseMarkers(baseName)
 
 	year := extractYear(baseName)
@@ -86,11 +99,30 @@ func ParseMovieName(filename string) (*MovieInfo, error) {
 	cleaned = strings.TrimSpace(cleaned)
 
 	if cleaned == "" {
-		return nil, fmt.Errorf("could not extract movie title from: %s", filename)
+		return nil, fmt.Errorf("could not extract movie title from: %s", baseName)
 	}
 
 	return &MovieInfo{
 		Title: cleaned,
+		Year:  year,
+	}, nil
+}
+
+func parseMovieAdvanced(baseName string) (*MovieInfo, error) {
+	cleaned := CleanMovieName(baseName)
+	if cleaned == "" {
+		return nil, fmt.Errorf("could not extract movie title from: %s", baseName)
+	}
+
+	year := ExtractYearAdvanced(baseName)
+
+	title := cleaned
+	if year != "" && strings.HasSuffix(cleaned, " ("+year+")") {
+		title = strings.TrimSuffix(cleaned, " ("+year+")")
+	}
+
+	return &MovieInfo{
+		Title: title,
 		Year:  year,
 	}, nil
 }

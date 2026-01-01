@@ -1,6 +1,8 @@
 # Binaries (in root only)
 /jellywatch
 /jellywatchd
+/installer
+/installer-test
 
 # Test binary
 *.test
