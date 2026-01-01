@@ -3,13 +3,13 @@
 
 # Directories to watch for new media files
 [watch]
-movies = ["/mnt/NVME3/Sabnzbd/complete/movies"]
-tv = ["/mnt/NVME3/Sabnzbd/complete/tv"]
+movies = ["/path/to/downloads/movies"]
+tv = ["/path/to/downloads/tv"]
 
 # Destination Jellyfin library directories
 [libraries]
-movies = ["/mnt/STORAGE1/MOVIES", "/mnt/STORAGE2/MOVIES"]
-tv = ["/mnt/STORAGE3/TV", "/mnt/STORAGE4/TV"]
+movies = ["/path/to/jellyfin/Movies"]
+tv = ["/path/to/jellyfin/TV Shows"]
 
 # Daemon settings
 [daemon]

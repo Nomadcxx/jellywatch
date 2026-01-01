@@ -5,8 +5,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=nomadx
-Group=nomadx
+# Change to your user/group
+User=jellyfin
+Group=jellyfin
 ExecStart=/usr/local/bin/jellywatchd
 Restart=on-failure
 RestartSec=5
@@ -16,7 +17,8 @@ StandardError=journal
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/mnt/STORAGE1 /mnt/STORAGE2 /mnt/STORAGE3 /mnt/STORAGE4 /mnt/STORAGE5 /mnt/STORAGE6 /mnt/STORAGE7 /mnt/STORAGE8 /mnt/STORAGE9 /mnt/NVME3
+# Add paths to your media directories here
+# ReadWritePaths=/path/to/media /path/to/downloads
 PrivateTmp=true
 
 [Install]

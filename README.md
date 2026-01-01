@@ -74,13 +74,13 @@ jellywatch organize --dry-run /path/to/library
 Configuration file location: `~/.config/jellywatch/config.toml`
 
 ```toml
-[watch.directories]
-movies = ["/mnt/STORAGE5/DOWNLOADS/Movies"]
-tv = ["/mnt/STORAGE5/DOWNLOADS/TV"]
+[watch]
+movies = ["/path/to/downloads/movies"]
+tv = ["/path/to/downloads/tv"]
 
 [libraries]
-movies = ["/mnt/STORAGE5/MOVIES"]
-tv = ["/mnt/STORAGE5/TVSHOWS"]
+movies = ["/path/to/jellyfin/Movies"]
+tv = ["/path/to/jellyfin/TV Shows"]
 
 [daemon]
 enabled = true
