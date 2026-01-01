@@ -3,20 +3,109 @@ package config
 import (
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/viper"
 )
 
+type PermissionsConfig struct {
+	// User can be a username (e.g., "jellyfin") or numeric UID (e.g., "1000").
+	User string `mapstructure:"user"`
+	// Group can be a group name (e.g., "jellyfin") or numeric GID (e.g., "1000").
+	Group string `mapstructure:"group"`
+	// Modes are strings in octal (e.g., "0644" or "644"). Empty means preserve source.
+	FileMode string `mapstructure:"file_mode"`
+	DirMode  string `mapstructure:"dir_mode"`
+}
+
 type Config struct {
-	Watch     WatchConfig     `mapstructure:"watch"`
-	Libraries LibrariesConfig `mapstructure:"libraries"`
-	Daemon    DaemonConfig    `mapstructure:"daemon"`
-	Options   OptionsConfig   `mapstructure:"options"`
-	Sonarr    SonarrConfig    `mapstructure:"sonarr"`
-	Radarr    RadarrConfig    `mapstructure:"radarr"`
-	Logging   LoggingConfig   `mapstructure:"logging"`
+	Watch       WatchConfig       `mapstructure:"watch"`
+	Libraries   LibrariesConfig   `mapstructure:"libraries"`
+	Daemon      DaemonConfig      `mapstructure:"daemon"`
+	Options     OptionsConfig     `mapstructure:"options"`
+	Sonarr      SonarrConfig      `mapstructure:"sonarr"`
+	Radarr      RadarrConfig      `mapstructure:"radarr"`
+	Logging     LoggingConfig     `mapstructure:"logging"`
+	Permissions PermissionsConfig `mapstructure:"permissions"`
+}
+
+// Helper methods for permissions resolution and parsing
+func (p *PermissionsConfig) WantsOwnership() bool {
+	return strings.TrimSpace(p.User) != "" || strings.TrimSpace(p.Group) != ""
+}
+
+func (p *PermissionsConfig) WantsMode() bool {
+	return strings.TrimSpace(p.FileMode) != "" || strings.TrimSpace(p.DirMode) != ""
+}
+
+func (p *PermissionsConfig) ResolveUID() (int, error) {
+	if p.User == "" {
+		return -1, nil
+	}
+	// If numeric
+	if uid, err := strconv.Atoi(p.User); err == nil {
+		return uid, nil
+	}
+	usr, err := user.Lookup(p.User)
+	if err != nil {
+		return -1, err
+	}
+	uid, err := strconv.Atoi(usr.Uid)
+	if err != nil {
+		return -1, err
+	}
+	return uid, nil
+}
+
+func (p *PermissionsConfig) ResolveGID() (int, error) {
+	if p.Group == "" {
+		return -1, nil
+	}
+	if gid, err := strconv.Atoi(p.Group); err == nil {
+		return gid, nil
+	}
+	grp, err := user.LookupGroup(p.Group)
+	if err != nil {
+		return -1, err
+	}
+	gid, err := strconv.Atoi(grp.Gid)
+	if err != nil {
+		return -1, err
+	}
+	return gid, nil
+}
+
+func (p *PermissionsConfig) ParseFileMode() (os.FileMode, error) {
+	if strings.TrimSpace(p.FileMode) == "" {
+		return 0, nil
+	}
+	m := strings.TrimSpace(p.FileMode)
+	if len(m) == 3 { // allow "644"
+		m = "0" + m
+	}
+	v, err := strconv.ParseUint(m, 8, 32)
+	if err != nil {
+		return 0, err
+	}
+	return os.FileMode(v), nil
+}
+
+func (p *PermissionsConfig) ParseDirMode() (os.FileMode, error) {
+	if strings.TrimSpace(p.DirMode) == "" {
+		return 0, nil
+	}
+	m := strings.TrimSpace(p.DirMode)
+	if len(m) == 3 {
+		m = "0" + m
+	}
+	v, err := strconv.ParseUint(m, 8, 32)
+	if err != nil {
+		return 0, err
+	}
+	return os.FileMode(v), nil
 }
 
 type LoggingConfig struct {
