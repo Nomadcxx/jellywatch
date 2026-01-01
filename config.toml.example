@@ -1,0 +1,39 @@
+# JellyWatch Configuration
+# Location: ~/.config/jellywatch/config.toml
+
+# Directories to watch for new media files
+[watch]
+movies = ["/mnt/NVME3/Sabnzbd/complete/movies"]
+tv = ["/mnt/NVME3/Sabnzbd/complete/tv"]
+
+# Destination Jellyfin library directories
+[libraries]
+movies = ["/mnt/STORAGE1/MOVIES", "/mnt/STORAGE2/MOVIES"]
+tv = ["/mnt/STORAGE3/TV", "/mnt/STORAGE4/TV"]
+
+# Daemon settings
+[daemon]
+enabled = true
+scan_frequency = "5m"
+
+# General options
+[options]
+dry_run = false
+verify_checksums = false
+delete_source = true
+
+# Sonarr integration (for TV shows)
+# Get API key from: Sonarr -> Settings -> General -> API Key
+[sonarr]
+enabled = false
+url = "http://localhost:8989"
+api_key = ""
+notify_on_import = true
+
+# Radarr integration (for movies)
+# Get API key from: Radarr -> Settings -> General -> API Key
+[radarr]
+enabled = false
+url = "http://localhost:7878"
+api_key = ""
+notify_on_import = true

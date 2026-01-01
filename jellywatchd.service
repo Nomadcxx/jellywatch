@@ -1,0 +1,23 @@
+[Unit]
+Description=JellyWatch Media Organizer Daemon
+Documentation=https://github.com/Nomadcxx/jellywatch
+After=network.target
+
+[Service]
+Type=simple
+User=nomadx
+Group=nomadx
+ExecStart=/usr/local/bin/jellywatchd
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/mnt/STORAGE1 /mnt/STORAGE2 /mnt/STORAGE3 /mnt/STORAGE4 /mnt/STORAGE5 /mnt/STORAGE6 /mnt/STORAGE7 /mnt/STORAGE8 /mnt/STORAGE9 /mnt/NVME3
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,38 @@
+# Binaries (in root only)
+/jellywatch
+/jellywatchd
+
+# Test binary
+*.test
+
+# Output
+*.out
+
+# Dependency directories
+vendor/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config (keep examples)
+*.toml
+*.yaml
+*.yml
+!config.example.toml
+
+# Development documentation
+AGENTS.md
+IMPLEMENTATION.md
+IMPLEMENTATION_PLAN_EXTENDED.md
+IMPLEMENTATION_REMAINING.md
+
+# Development tools
+.claude/
+.cursor/
+.aider*
+.continue/
