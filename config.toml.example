@@ -15,6 +15,7 @@ tv = ["/path/to/jellyfin/TV Shows"]
 [daemon]
 enabled = true
 scan_frequency = "5m"
+health_addr = ":8686"
 
 # General options
 [options]

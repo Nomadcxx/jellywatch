@@ -11,6 +11,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/daemon"
+	"github.com/Nomadcxx/jellywatch/internal/notify"
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
@@ -22,6 +23,7 @@ var (
 	cfgFile     string
 	dryRun      bool
 	backendName string
+	healthAddr  string
 )
 
 func main() {
@@ -36,6 +38,7 @@ It automatically organizes them according to Jellyfin naming conventions.`,
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file path")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "preview changes without moving files")
 	rootCmd.PersistentFlags().StringVar(&backendName, "backend", "auto", "transfer backend: auto, pv, rsync, native")
+	rootCmd.PersistentFlags().StringVar(&healthAddr, "health-addr", ":8686", "health check server address")
 
 	rootCmd.AddCommand(newInstallCmd())
 	rootCmd.AddCommand(newUninstallCmd())
@@ -60,38 +63,39 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no watch directories configured")
 	}
 
-	var sonarrClient *sonarr.Client
+	notifyMgr := notify.NewManager(true)
+
 	if cfg.Sonarr.Enabled && cfg.Sonarr.APIKey != "" && cfg.Sonarr.URL != "" {
-		sonarrClient = sonarr.NewClient(sonarr.Config{
+		sonarrClient := sonarr.NewClient(sonarr.Config{
 			URL:     cfg.Sonarr.URL,
 			APIKey:  cfg.Sonarr.APIKey,
 			Timeout: 30 * time.Second,
 		})
+		notifyMgr.Register(notify.NewSonarrNotifier(sonarrClient, cfg.Sonarr.NotifyOnImport))
 		log.Printf("Sonarr integration enabled: %s", cfg.Sonarr.URL)
 	}
 
-	var radarrClient *radarr.Client
 	if cfg.Radarr.Enabled && cfg.Radarr.APIKey != "" && cfg.Radarr.URL != "" {
-		radarrClient = radarr.NewClient(radarr.Config{
+		radarrClient := radarr.NewClient(radarr.Config{
 			URL:     cfg.Radarr.URL,
 			APIKey:  cfg.Radarr.APIKey,
 			Timeout: 30 * time.Second,
 		})
+		notifyMgr.Register(notify.NewRadarrNotifier(radarrClient, cfg.Radarr.NotifyOnImport))
 		log.Printf("Radarr integration enabled: %s", cfg.Radarr.URL)
 	}
 
 	handler := daemon.NewMediaHandler(daemon.MediaHandlerConfig{
-		TVLibraries:  cfg.Libraries.TV,
-		MovieLibs:    cfg.Libraries.Movies,
-		DebounceTime: 10 * time.Second,
-		DryRun:       dryRun || cfg.Options.DryRun,
-		Timeout:      5 * time.Minute,
-		SonarrClient: sonarrClient,
-		RadarrClient: radarrClient,
-		NotifySonarr: cfg.Sonarr.NotifyOnImport,
-		NotifyRadarr: cfg.Radarr.NotifyOnImport,
-		Backend:      transfer.ParseBackend(backendName),
+		TVLibraries:   cfg.Libraries.TV,
+		MovieLibs:     cfg.Libraries.Movies,
+		DebounceTime:  10 * time.Second,
+		DryRun:        dryRun || cfg.Options.DryRun,
+		Timeout:       5 * time.Minute,
+		Backend:       transfer.ParseBackend(backendName),
+		NotifyManager: notifyMgr,
 	})
+
+	healthServer := daemon.NewServer(handler, healthAddr)
 
 	w, err := watcher.NewWatcher(handler, dryRun || cfg.Options.DryRun)
 	if err != nil {
@@ -107,6 +111,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	log.Printf("Watching %d directories", len(watchPaths))
 	log.Printf("TV libraries: %v", cfg.Libraries.TV)
 	log.Printf("Movie libraries: %v", cfg.Libraries.Movies)
+	log.Printf("Health server: http://localhost%s/health", healthAddr)
 	if dryRun || cfg.Options.DryRun {
 		log.Printf("DRY RUN MODE - no files will be moved")
 	}
@@ -117,20 +122,34 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	errChan := make(chan error, 1)
+	errChan := make(chan error, 2)
+
 	go func() {
 		errChan <- w.Start()
+	}()
+
+	go func() {
+		errChan <- healthServer.Start()
 	}()
 
 	select {
 	case sig := <-sigChan:
 		log.Printf("Received signal: %v, shutting down...", sig)
+		healthServer.SetHealthy(false)
+
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+
+		healthServer.Shutdown(shutdownCtx)
 		handler.Shutdown()
 		cancel()
 		return nil
 
 	case err := <-errChan:
-		return fmt.Errorf("watcher error: %w", err)
+		if err != nil {
+			return fmt.Errorf("service error: %w", err)
+		}
+		return nil
 
 	case <-ctx.Done():
 		return nil

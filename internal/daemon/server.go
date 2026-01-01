@@ -1,0 +1,137 @@
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"sync"
+	"time"
+)
+
+type Server struct {
+	httpServer *http.Server
+	handler    *MediaHandler
+	startTime  time.Time
+	mu         sync.RWMutex
+	healthy    bool
+}
+
+type HealthResponse struct {
+	Status    string    `json:"status"`
+	Uptime    string    `json:"uptime"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+type MetricsResponse struct {
+	MoviesProcessed  int64   `json:"movies_processed"`
+	TVProcessed      int64   `json:"tv_processed"`
+	TotalProcessed   int64   `json:"total_processed"`
+	BytesTransferred int64   `json:"bytes_transferred"`
+	BytesTransferMB  float64 `json:"bytes_transferred_mb"`
+	Errors           int64   `json:"errors"`
+	UptimeSeconds    float64 `json:"uptime_seconds"`
+	LastProcessed    string  `json:"last_processed,omitempty"`
+}
+
+func NewServer(handler *MediaHandler, addr string) *Server {
+	s := &Server{
+		handler:   handler,
+		startTime: time.Now(),
+		healthy:   true,
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/healthz", s.handleHealth)
+	mux.HandleFunc("/ready", s.handleReady)
+	mux.HandleFunc("/metrics", s.handleMetrics)
+	mux.HandleFunc("/stats", s.handleMetrics)
+
+	s.httpServer = &http.Server{
+		Addr:         addr,
+		Handler:      mux,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	return s
+}
+
+func (s *Server) Start() error {
+	log.Printf("Health server starting on %s", s.httpServer.Addr)
+	if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("health server error: %w", err)
+	}
+	return nil
+}
+
+func (s *Server) Shutdown(ctx context.Context) error {
+	return s.httpServer.Shutdown(ctx)
+}
+
+func (s *Server) SetHealthy(healthy bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.healthy = healthy
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	healthy := s.healthy
+	s.mu.RUnlock()
+
+	response := HealthResponse{
+		Uptime:    time.Since(s.startTime).Round(time.Second).String(),
+		Timestamp: time.Now(),
+	}
+
+	if healthy {
+		response.Status = "healthy"
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+	} else {
+		response.Status = "unhealthy"
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+
+	json.NewEncoder(w).Encode(response)
+}
+
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	healthy := s.healthy
+	s.mu.RUnlock()
+
+	if healthy {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ready"))
+	} else {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("not ready"))
+	}
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	stats := s.handler.Stats()
+
+	response := MetricsResponse{
+		MoviesProcessed:  stats.MoviesProcessed,
+		TVProcessed:      stats.TVProcessed,
+		TotalProcessed:   stats.MoviesProcessed + stats.TVProcessed,
+		BytesTransferred: stats.BytesTransferred,
+		BytesTransferMB:  float64(stats.BytesTransferred) / (1024 * 1024),
+		Errors:           stats.Errors,
+		UptimeSeconds:    stats.Uptime.Seconds(),
+	}
+
+	if !stats.LastProcessed.IsZero() {
+		response.LastProcessed = stats.LastProcessed.Format(time.RFC3339)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}

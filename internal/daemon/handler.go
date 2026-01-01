@@ -8,38 +8,92 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/naming"
+	"github.com/Nomadcxx/jellywatch/internal/notify"
 	"github.com/Nomadcxx/jellywatch/internal/organizer"
-	"github.com/Nomadcxx/jellywatch/internal/radarr"
-	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 	"github.com/Nomadcxx/jellywatch/internal/watcher"
 )
 
 type MediaHandler struct {
-	organizer    *organizer.Organizer
-	sonarrClient *sonarr.Client
-	radarrClient *radarr.Client
-	tvLibraries  []string
-	movieLibs    []string
-	debounceTime time.Duration
-	pending      map[string]*time.Timer
-	mu           sync.Mutex
-	dryRun       bool
-	notifySonarr bool
-	notifyRadarr bool
+	organizer     *organizer.Organizer
+	notifyManager *notify.Manager
+	tvLibraries   []string
+	movieLibs     []string
+	debounceTime  time.Duration
+	pending       map[string]*time.Timer
+	mu            sync.Mutex
+	dryRun        bool
+	stats         *Stats
+}
+
+type Stats struct {
+	mu               sync.RWMutex
+	MoviesProcessed  int64
+	TVProcessed      int64
+	BytesTransferred int64
+	Errors           int64
+	LastProcessed    time.Time
+	StartTime        time.Time
+}
+
+func NewStats() *Stats {
+	return &Stats{
+		StartTime: time.Now(),
+	}
+}
+
+func (s *Stats) RecordMovie(bytes int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.MoviesProcessed++
+	s.BytesTransferred += bytes
+	s.LastProcessed = time.Now()
+}
+
+func (s *Stats) RecordTV(bytes int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.TVProcessed++
+	s.BytesTransferred += bytes
+	s.LastProcessed = time.Now()
+}
+
+func (s *Stats) RecordError() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Errors++
+}
+
+func (s *Stats) Snapshot() StatsSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return StatsSnapshot{
+		MoviesProcessed:  s.MoviesProcessed,
+		TVProcessed:      s.TVProcessed,
+		BytesTransferred: s.BytesTransferred,
+		Errors:           s.Errors,
+		LastProcessed:    s.LastProcessed,
+		Uptime:           time.Since(s.StartTime),
+	}
+}
+
+type StatsSnapshot struct {
+	MoviesProcessed  int64
+	TVProcessed      int64
+	BytesTransferred int64
+	Errors           int64
+	LastProcessed    time.Time
+	Uptime           time.Duration
 }
 
 type MediaHandlerConfig struct {
-	TVLibraries  []string
-	MovieLibs    []string
-	DebounceTime time.Duration
-	DryRun       bool
-	Timeout      time.Duration
-	SonarrClient *sonarr.Client
-	RadarrClient *radarr.Client
-	NotifySonarr bool
-	NotifyRadarr bool
-	Backend      transfer.Backend
+	TVLibraries   []string
+	MovieLibs     []string
+	DebounceTime  time.Duration
+	DryRun        bool
+	Timeout       time.Duration
+	Backend       transfer.Backend
+	NotifyManager *notify.Manager
 }
 
 func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
@@ -59,16 +113,14 @@ func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
 	)
 
 	return &MediaHandler{
-		organizer:    org,
-		sonarrClient: cfg.SonarrClient,
-		radarrClient: cfg.RadarrClient,
-		tvLibraries:  cfg.TVLibraries,
-		movieLibs:    cfg.MovieLibs,
-		debounceTime: cfg.DebounceTime,
-		pending:      make(map[string]*time.Timer),
-		dryRun:       cfg.DryRun,
-		notifySonarr: cfg.NotifySonarr,
-		notifyRadarr: cfg.NotifyRadarr,
+		organizer:     org,
+		notifyManager: cfg.NotifyManager,
+		tvLibraries:   cfg.TVLibraries,
+		movieLibs:     cfg.MovieLibs,
+		debounceTime:  cfg.DebounceTime,
+		pending:       make(map[string]*time.Timer),
+		dryRun:        cfg.DryRun,
+		stats:         NewStats(),
 	}
 }
 
@@ -112,6 +164,7 @@ func (h *MediaHandler) processFile(path string) {
 	var result *organizer.OrganizationResult
 	var err error
 	var targetLib string
+	var mediaType notify.MediaType
 
 	if naming.IsTVEpisodeFilename(filename) {
 		if len(h.tvLibraries) == 0 {
@@ -119,6 +172,7 @@ func (h *MediaHandler) processFile(path string) {
 			return
 		}
 		targetLib = h.tvLibraries[0]
+		mediaType = notify.MediaTypeTVEpisode
 
 		if !h.checkTargetHealth(targetLib) {
 			log.Printf("Target library unhealthy, skipping: %s", filename)
@@ -132,6 +186,7 @@ func (h *MediaHandler) processFile(path string) {
 			return
 		}
 		targetLib = h.movieLibs[0]
+		mediaType = notify.MediaTypeMovie
 
 		if !h.checkTargetHealth(targetLib) {
 			log.Printf("Target library unhealthy, skipping: %s", filename)
@@ -146,6 +201,7 @@ func (h *MediaHandler) processFile(path string) {
 
 	if err != nil {
 		log.Printf("Organization failed for %s: %v", filename, err)
+		h.stats.RecordError()
 		return
 	}
 
@@ -156,15 +212,36 @@ func (h *MediaHandler) processFile(path string) {
 			float64(result.BytesCopied)/(1024*1024),
 			result.Duration)
 
-		if h.notifySonarr && h.sonarrClient != nil && naming.IsTVEpisodeFilename(filename) {
-			h.notifySonarrImport(result.TargetPath)
+		if mediaType == notify.MediaTypeMovie {
+			h.stats.RecordMovie(result.BytesCopied)
+		} else {
+			h.stats.RecordTV(result.BytesCopied)
 		}
-		if h.notifyRadarr && h.radarrClient != nil && naming.IsMovieFilename(filename) {
-			h.notifyRadarrImport(result.TargetPath)
-		}
+
+		h.sendNotifications(result, mediaType)
+	} else if result.Skipped {
+		log.Printf("Skipped: %s - %s", filename, result.SkipReason)
 	} else {
 		log.Printf("Organization failed: %s - %v", filename, result.Error)
+		h.stats.RecordError()
 	}
+}
+
+func (h *MediaHandler) sendNotifications(result *organizer.OrganizationResult, mediaType notify.MediaType) {
+	if h.notifyManager == nil {
+		return
+	}
+
+	event := notify.OrganizationEvent{
+		MediaType:   mediaType,
+		SourcePath:  result.SourcePath,
+		TargetPath:  result.TargetPath,
+		TargetDir:   filepath.Dir(result.TargetPath),
+		BytesCopied: result.BytesCopied,
+		Duration:    result.Duration,
+	}
+
+	h.notifyManager.Notify(event)
 }
 
 func (h *MediaHandler) checkTargetHealth(targetLib string) bool {
@@ -174,30 +251,6 @@ func (h *MediaHandler) checkTargetHealth(targetLib string) bool {
 		return false
 	}
 	return true
-}
-
-func (h *MediaHandler) notifySonarrImport(targetPath string) {
-	targetDir := filepath.Dir(targetPath)
-
-	resp, err := h.sonarrClient.TriggerDownloadedEpisodesScan(targetDir)
-	if err != nil {
-		log.Printf("Failed to notify Sonarr: %v", err)
-		return
-	}
-
-	log.Printf("Sonarr import triggered (command ID: %d)", resp.ID)
-}
-
-func (h *MediaHandler) notifyRadarrImport(targetPath string) {
-	targetDir := filepath.Dir(targetPath)
-
-	resp, err := h.radarrClient.TriggerDownloadedMoviesScan(targetDir)
-	if err != nil {
-		log.Printf("Failed to notify Radarr: %v", err)
-		return
-	}
-
-	log.Printf("Radarr import triggered (command ID: %d)", resp.ID)
 }
 
 func (h *MediaHandler) isMediaFile(path string) bool {
@@ -210,6 +263,10 @@ func (h *MediaHandler) isMediaFile(path string) bool {
 	return mediaExts[ext]
 }
 
+func (h *MediaHandler) Stats() StatsSnapshot {
+	return h.stats.Snapshot()
+}
+
 func (h *MediaHandler) Shutdown() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -217,5 +274,9 @@ func (h *MediaHandler) Shutdown() {
 	for path, timer := range h.pending {
 		timer.Stop()
 		delete(h.pending, path)
+	}
+
+	if h.notifyManager != nil {
+		h.notifyManager.Close()
 	}
 }

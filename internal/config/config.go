@@ -31,10 +31,10 @@ type LibrariesConfig struct {
 	TV     []string `mapstructure:"tv"`
 }
 
-// DaemonConfig contains daemon settings
 type DaemonConfig struct {
 	Enabled       bool   `mapstructure:"enabled"`
 	ScanFrequency string `mapstructure:"scan_frequency"`
+	HealthAddr    string `mapstructure:"health_addr"`
 }
 
 // OptionsConfig contains general options
@@ -73,6 +73,7 @@ func DefaultConfig() *Config {
 		Daemon: DaemonConfig{
 			Enabled:       false,
 			ScanFrequency: "5m",
+			HealthAddr:    ":8686",
 		},
 		Options: OptionsConfig{
 			DryRun:          false,
@@ -211,6 +212,7 @@ notify_on_import = %v
 [daemon]
 enabled = %v
 scan_frequency = "%s"
+health_addr = "%s"
 
 # ============================================================================
 # GENERAL OPTIONS
@@ -239,6 +241,7 @@ delete_source = %v
 		c.Radarr.NotifyOnImport,
 		c.Daemon.Enabled,
 		c.Daemon.ScanFrequency,
+		c.Daemon.HealthAddr,
 		c.Options.DryRun,
 		c.Options.VerifyChecksums,
 		c.Options.DeleteSource,
