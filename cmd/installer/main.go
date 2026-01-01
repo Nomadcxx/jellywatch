@@ -316,24 +316,36 @@ func createConfig(m *model) error {
 	return nil
 }
 
+func splitAndFormatPaths(pathsInput string) string {
+	paths := strings.Split(pathsInput, ",")
+	var formatted []string
+	for _, path := range paths {
+		trimmed := strings.TrimSpace(path)
+		if trimmed != "" {
+			formatted = append(formatted, fmt.Sprintf("\"%s\"", trimmed))
+		}
+	}
+	return strings.Join(formatted, ", ")
+}
+
 func generateConfig(m *model) string {
 	var sb strings.Builder
 
 	sb.WriteString("[watch]\n")
 	if m.tvWatchDir != "" {
-		sb.WriteString(fmt.Sprintf("tv = [\"%s\"]\n", m.tvWatchDir))
+		sb.WriteString(fmt.Sprintf("tv = [%s]\n", splitAndFormatPaths(m.tvWatchDir)))
 	}
 	if m.movieWatchDir != "" {
-		sb.WriteString(fmt.Sprintf("movies = [\"%s\"]\n", m.movieWatchDir))
+		sb.WriteString(fmt.Sprintf("movies = [%s]\n", splitAndFormatPaths(m.movieWatchDir)))
 	}
 	sb.WriteString("\n")
 
 	sb.WriteString("[libraries]\n")
 	if m.tvLibraryDir != "" {
-		sb.WriteString(fmt.Sprintf("tv = [\"%s\"]\n", m.tvLibraryDir))
+		sb.WriteString(fmt.Sprintf("tv = [%s]\n", splitAndFormatPaths(m.tvLibraryDir)))
 	}
 	if m.movieLibraryDir != "" {
-		sb.WriteString(fmt.Sprintf("movies = [\"%s\"]\n", m.movieLibraryDir))
+		sb.WriteString(fmt.Sprintf("movies = [%s]\n", splitAndFormatPaths(m.movieLibraryDir)))
 	}
 	sb.WriteString("\n")
 
@@ -457,28 +469,28 @@ func (m *model) initInputsForStep() {
 	switch m.step {
 	case stepWatchDirs:
 		tvInput := textinput.New()
-		tvInput.Placeholder = "/mnt/downloads/tv"
+		tvInput.Placeholder = "/mnt/downloads/tv (comma-separated for multiple)"
 		tvInput.Focus()
-		tvInput.Width = 50
+		tvInput.Width = 60
 		tvInput.SetValue(m.tvWatchDir)
 
 		movieInput := textinput.New()
-		movieInput.Placeholder = "/mnt/downloads/movies"
-		movieInput.Width = 50
+		movieInput.Placeholder = "/mnt/downloads/movies (comma-separated for multiple)"
+		movieInput.Width = 60
 		movieInput.SetValue(m.movieWatchDir)
 
 		m.inputs = []textinput.Model{tvInput, movieInput}
 
 	case stepLibraryPaths:
 		tvLibInput := textinput.New()
-		tvLibInput.Placeholder = "/mnt/media/TV Shows"
+		tvLibInput.Placeholder = "/mnt/media/TV Shows (comma-separated for multiple)"
 		tvLibInput.Focus()
-		tvLibInput.Width = 50
+		tvLibInput.Width = 60
 		tvLibInput.SetValue(m.tvLibraryDir)
 
 		movieLibInput := textinput.New()
-		movieLibInput.Placeholder = "/mnt/media/Movies"
-		movieLibInput.Width = 50
+		movieLibInput.Placeholder = "/mnt/media/Movies (comma-separated for multiple)"
+		movieLibInput.Width = 60
 		movieLibInput.SetValue(m.movieLibraryDir)
 
 		m.inputs = []textinput.Model{tvLibInput, movieLibInput}
