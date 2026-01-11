@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -40,6 +41,7 @@ type installStep int
 
 const (
 	stepWelcome installStep = iota
+	stepUpdateNotice  // NEW: shown when existing DB detected
 	stepWatchDirs
 	stepLibraryPaths
 	stepSonarr
@@ -47,6 +49,8 @@ const (
 	stepPermissions
 	stepConfirm
 	stepInstalling
+	stepInitialScan   // NEW: runs scanner with progress
+	stepScanEducation // NEW: shows results and commands
 	stepComplete
 )
 
@@ -109,6 +113,36 @@ type model struct {
 	permGroup    string
 	permFileMode string
 	permDirMode  string
+
+	// Installation mode detection
+	existingDBDetected bool
+	existingDBPath     string
+	existingDBModTime  time.Time
+	updateWithRefresh  bool       // true = update + rescan, false = update only
+	forceWizard        bool       // 'W' key pressed to run full wizard
+
+	// Scan state
+	scanProgress    ScanProgress
+	scanResult      *ScanResult
+	scanStats       *database.ConsolidationStats
+	exampleDupe     *database.DuplicateGroup
+	program         *tea.Program // for sending messages from goroutines
+}
+
+// ScanProgress mirrors scanner.ScanProgress for TUI
+type ScanProgress struct {
+	FilesScanned   int
+	CurrentPath    string
+	LibrariesDone  int
+	LibrariesTotal int
+}
+
+// ScanResult mirrors scanner.ScanResult for TUI
+type ScanResult struct {
+	FilesScanned int
+	FilesAdded   int
+	Duration     time.Duration
+	Errors       []error
 }
 
 // Task completion message
@@ -128,6 +162,19 @@ type apiTestResultMsg struct {
 	success bool
 	version string
 	err     error
+}
+
+// Scan progress message
+type scanProgressMsg struct {
+	progress ScanProgress
+}
+
+// Scan complete message
+type scanCompleteMsg struct {
+	result *ScanResult
+	stats  *database.ConsolidationStats
+	dupe   *database.DuplicateGroup
+	err    error
 }
 
 // Initialize new model
@@ -384,15 +431,19 @@ func generateConfig(m *model) string {
 
 	if m.sonarrEnabled {
 		sb.WriteString("[sonarr]\n")
+		sb.WriteString("enabled = true\n")
 		sb.WriteString(fmt.Sprintf("url = \"%s\"\n", m.sonarrURL))
 		sb.WriteString(fmt.Sprintf("api_key = \"%s\"\n", m.sonarrAPIKey))
+		sb.WriteString("notify_on_import = true\n")
 		sb.WriteString("\n")
 	}
 
 	if m.radarrEnabled {
 		sb.WriteString("[radarr]\n")
+		sb.WriteString("enabled = true\n")
 		sb.WriteString(fmt.Sprintf("url = \"%s\"\n", m.radarrURL))
 		sb.WriteString(fmt.Sprintf("api_key = \"%s\"\n", m.radarrAPIKey))
+		sb.WriteString("notify_on_import = true\n")
 		sb.WriteString("\n")
 	}
 
