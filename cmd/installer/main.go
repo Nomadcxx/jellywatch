@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/scanner"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -127,6 +129,9 @@ type model struct {
 	scanStats       *database.ConsolidationStats
 	exampleDupe     *database.DuplicateGroup
 	program         *tea.Program // for sending messages from goroutines
+	scanCancel      context.CancelFunc // for cancelling scan
+	episodeCount    int // actual count from database
+	movieCount      int // actual count from database
 }
 
 // ScanProgress mirrors scanner.ScanProgress for TUI
@@ -164,6 +169,11 @@ type apiTestResultMsg struct {
 	err     error
 }
 
+// Scan start message (to store cancel function)
+type scanStartMsg struct {
+	cancel context.CancelFunc
+}
+
 // Scan progress message
 type scanProgressMsg struct {
 	progress ScanProgress
@@ -171,10 +181,28 @@ type scanProgressMsg struct {
 
 // Scan complete message
 type scanCompleteMsg struct {
-	result *ScanResult
-	stats  *database.ConsolidationStats
-	dupe   *database.DuplicateGroup
-	err    error
+	result       *ScanResult
+	stats        *database.ConsolidationStats
+	dupe         *database.DuplicateGroup
+	err          error
+	episodeCount int
+	movieCount   int
+}
+
+// detectExistingInstall checks if jellywatch is already installed
+func detectExistingInstall() (exists bool, dbPath string, modTime time.Time) {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return false, "", time.Time{}
+	}
+
+	dbPath = filepath.Join(configDir, "jellywatch", "media.db")
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		return false, dbPath, time.Time{}
+	}
+
+	return true, dbPath, info.ModTime()
 }
 
 // Initialize new model
@@ -183,6 +211,9 @@ func newModel() model {
 	s.Style = lipgloss.NewStyle().Foreground(Secondary)
 	s.Spinner = spinner.Dot
 
+	// Detect existing installation
+	exists, dbPath, modTime := detectExistingInstall()
+
 	return model{
 		step:             stepWelcome,
 		currentTaskIndex: -1,
@@ -190,8 +221,11 @@ func newModel() model {
 		errors:           []string{},
 		selectedOption:   0,
 		// Default values
-		sonarrEnabled: false,
-		radarrEnabled: false,
+		sonarrEnabled:    false,
+		radarrEnabled:    false,
+		existingDBDetected: exists,
+		existingDBPath:     dbPath,
+		existingDBModTime:  modTime,
 	}
 }
 
@@ -277,6 +311,15 @@ func testRadarr(url, apiKey string) tea.Cmd {
 	}
 }
 
+func initializeDatabase(m *model) error {
+	db, err := database.Open()
+	if err != nil {
+		return fmt.Errorf("failed to initialize database: %w", err)
+	}
+	defer db.Close()
+	return nil
+}
+
 func (m *model) initTasks() {
 	if m.uninstallMode {
 		m.tasks = []installTask{
@@ -289,6 +332,7 @@ func (m *model) initTasks() {
 			{name: "Build binaries", description: "Building jellywatch and jellywatchd", execute: buildBinaries, status: statusPending},
 			{name: "Install binaries", description: "Installing to /usr/local/bin", execute: installBinaries, status: statusPending},
 			{name: "Create config", description: "Creating configuration directory", execute: createConfig, status: statusPending},
+			{name: "Initialize database", description: "Creating media database", execute: initializeDatabase, status: statusPending},
 			{name: "Install systemd files", description: "Installing service file", execute: installSystemdFiles, status: statusPending},
 			{name: "Enable daemon", description: "Enabling and starting jellywatchd", execute: enableDaemon, status: statusPending},
 		}
@@ -710,11 +754,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
-			if m.step != stepInstalling {
+			// Cancel scan if running
+			if m.scanCancel != nil {
+				m.scanCancel()
+				m.scanCancel = nil
+			}
+			if m.step != stepInstalling && m.step != stepInitialScan {
 				return m, tea.Quit
+			}
+			// If scanning, allow quit but scan will continue in background
+			if m.step == stepInitialScan {
+				return m, tea.Quit
+			}
+		case "w", "W":
+			if m.step == stepWelcome && m.existingDBDetected {
+				m.forceWizard = true
+				// Re-render to show fresh install options
+				return m, nil
 			}
 		case "up", "k":
 			if m.step == stepWelcome && m.selectedOption > 0 {
+				m.selectedOption--
+			} else if m.step == stepUpdateNotice && m.selectedOption > 0 {
 				m.selectedOption--
 			} else if m.step == stepSonarr || m.step == stepRadarr {
 				if m.focusedInput == 1 && m.selectedOption > 0 {
@@ -729,6 +790,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "down", "j":
 			if m.step == stepWelcome && m.selectedOption < 1 {
+				m.selectedOption++
+			} else if m.step == stepUpdateNotice && m.selectedOption < 1 {
 				m.selectedOption++
 			} else if m.step == stepSonarr || m.step == stepRadarr {
 				if m.focusedInput == 1 && m.selectedOption < 1 {
@@ -774,12 +837,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			if m.step == stepWelcome {
-				m.uninstallMode = m.selectedOption == 1
-				if !m.uninstallMode {
-					m.step = stepWatchDirs
-					m.initInputsForStep()
-					return m, nil
+				if m.selectedOption == 0 {
+					if m.existingDBDetected && !m.forceWizard {
+						// Go to update notice screen
+						m.step = stepUpdateNotice
+					} else {
+						// Fresh install - go to watch dirs
+						m.step = stepWatchDirs
+						m.initInputsForStep()
+					}
 				} else {
+					// Uninstall
+					m.uninstallMode = true
 					m.initTasks()
 					m.step = stepInstalling
 					m.currentTaskIndex = 0
@@ -788,6 +857,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.spinner.Tick,
 						executeTask(0, &m),
 					)
+				}
+				return m, nil
+			} else if m.step == stepUpdateNotice {
+				switch msg.String() {
+				case "w", "W":
+					m.forceWizard = true
+					m.step = stepWatchDirs
+					m.initInputsForStep()
+					return m, nil
+				case "enter":
+					m.updateWithRefresh = (m.selectedOption == 0)
+					m.initTasks()
+					m.step = stepInstalling
+					m.currentTaskIndex = 0
+					m.tasks[0].status = statusRunning
+					return m, tea.Batch(m.spinner.Tick, executeTask(0, &m))
+				case "esc":
+					m.step = stepWelcome
+					m.selectedOption = 0
+					return m, nil
 				}
 			} else if m.step == stepWatchDirs || m.step == stepLibraryPaths {
 				m.saveInputsFromStep()
@@ -830,17 +919,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.initInputsForStep()
 				}
 				return m, nil
+			} else if m.step == stepScanEducation {
+				if msg.String() == "enter" {
+					m.step = stepComplete
+					return m, nil
+				}
 			} else if m.step == stepComplete {
 				return m, tea.Quit
 			}
 		case "esc":
-			if m.step != stepWelcome && m.step != stepInstalling && m.step != stepComplete {
+			if m.step != stepWelcome && m.step != stepInstalling && m.step != stepComplete && m.step != stepUpdateNotice {
 				prevStep := m.step - 1
 				if prevStep < stepWelcome {
 					prevStep = stepWelcome
 				}
 				m.step = prevStep
-				if m.step != stepWelcome && m.step != stepConfirm {
+				if m.step != stepWelcome && m.step != stepConfirm && m.step != stepUpdateNotice {
 					m.initInputsForStep()
 				}
 				return m, nil
@@ -894,12 +988,40 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.currentTaskIndex++
 		if m.currentTaskIndex >= len(m.tasks) {
+			// Check if we should run initial scan
+			shouldScan := !m.uninstallMode && (!m.existingDBDetected || m.updateWithRefresh || m.forceWizard)
+			if shouldScan && (m.tvLibraryDir != "" || m.movieLibraryDir != "") {
+				m.step = stepInitialScan
+				return m, tea.Batch(m.spinner.Tick, m.runInitialScan())
+			}
 			m.step = stepComplete
 			return m, nil
 		}
 
 		m.tasks[m.currentTaskIndex].status = statusRunning
 		return m, executeTask(m.currentTaskIndex, &m)
+
+	case scanStartMsg:
+		// Store cancel function for scan cancellation
+		m.scanCancel = msg.cancel
+		return m, nil
+
+	case scanProgressMsg:
+		m.scanProgress = msg.progress
+		return m, nil
+
+	case scanCompleteMsg:
+		if msg.err != nil {
+			m.errors = append(m.errors, fmt.Sprintf("Scan failed: %s", msg.err.Error()))
+		}
+		m.scanResult = msg.result
+		m.scanStats = msg.stats
+		m.exampleDupe = msg.dupe
+		m.episodeCount = msg.episodeCount
+		m.movieCount = msg.movieCount
+		m.scanCancel = nil // Clear cancel function after scan completes
+		m.step = stepScanEducation
+		return m, nil
 	}
 
 	if len(m.inputs) > 0 && m.focusedInput < len(m.inputs) {
@@ -962,6 +1084,8 @@ func (m model) View() string {
 	switch m.step {
 	case stepWelcome:
 		mainContent = m.renderWelcome()
+	case stepUpdateNotice:
+		mainContent = m.renderUpdateNotice()
 	case stepWatchDirs:
 		mainContent = m.renderWatchDirs()
 	case stepLibraryPaths:
@@ -976,6 +1100,10 @@ func (m model) View() string {
 		mainContent = m.renderConfirm()
 	case stepInstalling:
 		mainContent = m.renderInstalling()
+	case stepInitialScan:
+		mainContent = m.renderInitialScan()
+	case stepScanEducation:
+		mainContent = m.renderScanEducation()
 	case stepComplete:
 		mainContent = m.renderComplete()
 	default:
@@ -1016,21 +1144,292 @@ func (m model) renderWelcome() string {
 
 	content += "Select an option:\n\n"
 
-	installPrefix := "  "
+	if m.existingDBDetected && !m.forceWizard {
+		// Update mode - existing installation detected
+		updatePrefix := "  "
+		if m.selectedOption == 0 {
+			updatePrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		}
+		content += updatePrefix + "Update jellywatch\n"
+		content += "    Reinstalls binaries, preserves configuration\n\n"
+
+		uninstallPrefix := "  "
+		if m.selectedOption == 1 {
+			uninstallPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		}
+		content += uninstallPrefix + "Uninstall jellywatch\n"
+		content += "    Removes jellywatch from your system\n\n"
+
+		content += lipgloss.NewStyle().Foreground(FgMuted).Render(
+			fmt.Sprintf("Database: %s\nLast modified: %s",
+				m.existingDBPath,
+				m.existingDBModTime.Format("2006-01-02 15:04")))
+		content += "\n\n"
+		content += lipgloss.NewStyle().Foreground(Secondary).Render("Press W to run first-run wizard")
+	} else {
+		// Fresh install mode
+		installPrefix := "  "
+		if m.selectedOption == 0 {
+			installPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		}
+		content += installPrefix + "Install jellywatch\n"
+		content += "    Builds binaries, installs to system, configures daemon\n\n"
+
+		uninstallPrefix := "  "
+		if m.selectedOption == 1 {
+			uninstallPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		}
+		content += uninstallPrefix + "Uninstall jellywatch\n"
+		content += "    Removes jellywatch from your system\n\n"
+
+		content += lipgloss.NewStyle().Foreground(FgMuted).Render("Requires root privileges")
+	}
+
+	return content
+}
+
+func (m model) renderUpdateNotice() string {
+	var content string
+
+	content += lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("Existing Installation Detected") + "\n\n"
+
+	content += fmt.Sprintf("Database: %s\n", lipgloss.NewStyle().Foreground(FgMuted).Render(m.existingDBPath))
+	content += fmt.Sprintf("Last modified: %s\n\n", lipgloss.NewStyle().Foreground(FgMuted).Render(m.existingDBModTime.Format("2006-01-02 15:04")))
+
+	// Option 1: Update and refresh
+	refreshPrefix := "  "
 	if m.selectedOption == 0 {
-		installPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		refreshPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
 	}
-	content += installPrefix + "Install jellywatch\n"
-	content += "    Builds binaries, installs to system, configures daemon\n\n"
+	content += refreshPrefix + "Update and refresh database " + lipgloss.NewStyle().Foreground(SuccessColor).Render("(recommended)") + "\n"
+	content += "    Reinstalls binaries, runs library scan\n\n"
 
-	uninstallPrefix := "  "
+	// Option 2: Update only
+	updatePrefix := "  "
 	if m.selectedOption == 1 {
-		uninstallPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		updatePrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
 	}
-	content += uninstallPrefix + "Uninstall jellywatch\n"
-	content += "    Removes jellywatch from your system\n\n"
+	content += updatePrefix + "Update only\n"
+	content += "    Reinstalls binaries, keeps existing database\n\n"
 
-	content += lipgloss.NewStyle().Foreground(FgMuted).Render("Requires root privileges")
+	content += lipgloss.NewStyle().Foreground(Secondary).Render("Press W to run first-run wizard instead")
+
+	return content
+}
+
+func (m *model) runInitialScan() tea.Cmd {
+	return func() tea.Msg {
+		// Create cancellable context for scan
+		ctx, cancel := context.WithCancel(context.Background())
+		
+		// Send cancel function to model via message
+		if m.program != nil {
+			m.program.Send(scanStartMsg{cancel: cancel})
+		}
+		
+		db, err := database.Open()
+		if err != nil {
+			return scanCompleteMsg{err: err}
+		}
+		defer db.Close()
+
+		fileScanner := scanner.NewFileScanner(db)
+
+		// Build library lists from config
+		var tvLibs, movieLibs []string
+		if m.tvLibraryDir != "" {
+			tvLibs = strings.Split(m.tvLibraryDir, ",")
+			for i := range tvLibs {
+				tvLibs[i] = strings.TrimSpace(tvLibs[i])
+			}
+		}
+		if m.movieLibraryDir != "" {
+			movieLibs = strings.Split(m.movieLibraryDir, ",")
+			for i := range movieLibs {
+				movieLibs[i] = strings.TrimSpace(movieLibs[i])
+			}
+		}
+
+		// Run scan with progress callback and cancellable context
+		result, err := fileScanner.ScanWithOptions(ctx, scanner.ScanOptions{
+			TVLibraries:    tvLibs,
+			MovieLibraries: movieLibs,
+			OnProgress: func(p scanner.ScanProgress) {
+				if m.program != nil {
+					m.program.Send(scanProgressMsg{
+						progress: ScanProgress{
+							FilesScanned:   p.FilesScanned,
+							CurrentPath:    p.CurrentPath,
+							LibrariesDone:  p.LibrariesDone,
+							LibrariesTotal: p.LibrariesTotal,
+						},
+					})
+				}
+			},
+		})
+
+		if err != nil {
+			return scanCompleteMsg{err: err}
+		}
+
+		// Get stats and example duplicate
+		stats, err := db.GetConsolidationStats()
+		if err != nil {
+			// Log error but don't fail - stats are informational
+			stats = nil
+		}
+
+		// Get actual episode and movie counts
+		episodeCount, err := db.CountMediaFilesByType("episode")
+		if err != nil {
+			episodeCount = 0
+		}
+		movieCount, err := db.CountMediaFilesByType("movie")
+		if err != nil {
+			movieCount = 0
+		}
+
+		var exampleDupe *database.DuplicateGroup
+		movieDupes, err := db.FindDuplicateMovies()
+		if err == nil && len(movieDupes) > 0 {
+			exampleDupe = &movieDupes[0]
+		} else {
+			episodeDupes, err := db.FindDuplicateEpisodes()
+			if err == nil && len(episodeDupes) > 0 {
+				exampleDupe = &episodeDupes[0]
+			}
+		}
+
+		return scanCompleteMsg{
+			result: &ScanResult{
+				FilesScanned: result.FilesScanned,
+				FilesAdded:   result.FilesAdded,
+				Duration:     result.Duration,
+				Errors:       result.Errors,
+			},
+			stats:        stats,
+			dupe:         exampleDupe,
+			episodeCount: episodeCount,
+			movieCount:   movieCount,
+		}
+	}
+}
+
+func (m model) renderInitialScan() string {
+	var content string
+
+	content += lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("Scanning Libraries...") + "\n\n"
+
+	content += fmt.Sprintf("  Libraries: %d/%d complete\n",
+		m.scanProgress.LibrariesDone, m.scanProgress.LibrariesTotal)
+	content += fmt.Sprintf("  Files:     %d scanned\n", m.scanProgress.FilesScanned)
+
+	// Truncate current path if too long
+	currentPath := m.scanProgress.CurrentPath
+	if len(currentPath) > 50 {
+		currentPath = "..." + currentPath[len(currentPath)-47:]
+	}
+	content += fmt.Sprintf("  Current:   %s\n\n", lipgloss.NewStyle().Foreground(FgMuted).Render(currentPath))
+
+	// Progress bar
+	progress := 0.0
+	if m.scanProgress.LibrariesTotal > 0 {
+		progress = float64(m.scanProgress.LibrariesDone) / float64(m.scanProgress.LibrariesTotal)
+	}
+	barWidth := 40
+	filled := int(progress * float64(barWidth))
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+	content += fmt.Sprintf("  [%s] %d%%\n", bar, int(progress*100))
+
+	content += "\n" + m.spinner.View() + " Scanning..."
+
+	return content
+}
+
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+func (m model) renderScanEducation() string {
+	var content string
+
+	content += lipgloss.NewStyle().Foreground(SuccessColor).Bold(true).Render("✓ Library Scan Complete") + "\n\n"
+
+	// Scan results section
+	content += lipgloss.NewStyle().Foreground(Primary).Render("SCAN RESULTS") + "\n"
+	content += lipgloss.NewStyle().Foreground(FgMuted).Render("───────────────") + "\n"
+
+	if m.scanResult != nil {
+		content += fmt.Sprintf("  Files scanned:    %d\n", m.scanResult.FilesScanned)
+	}
+
+	if m.scanStats != nil {
+		// Use actual counts from database instead of estimates
+		content += fmt.Sprintf("  TV episodes:      %d\n", m.episodeCount)
+		content += fmt.Sprintf("  Movies:           %d\n", m.movieCount)
+		content += fmt.Sprintf("  Duplicates found: %d\n", m.scanStats.DuplicateGroups)
+	}
+	content += "\n"
+
+	// Example duplicate section
+	if m.exampleDupe != nil && len(m.exampleDupe.Files) >= 2 {
+		content += lipgloss.NewStyle().Foreground(Primary).Render("EXAMPLE DUPLICATE") + "\n"
+		content += lipgloss.NewStyle().Foreground(FgMuted).Render("───────────────────") + "\n"
+
+		// Title with year
+		title := m.exampleDupe.NormalizedTitle
+		if m.exampleDupe.Year != nil {
+			title += fmt.Sprintf(" (%d)", *m.exampleDupe.Year)
+		}
+		content += "  " + title + "\n"
+
+		// Best file (KEEP)
+		best := m.exampleDupe.Files[0]
+		bestPath := best.Path
+		if len(bestPath) > 35 {
+			bestPath = "..." + bestPath[len(bestPath)-32:]
+		}
+		content += fmt.Sprintf("    %s %s  %s  %s\n",
+			lipgloss.NewStyle().Foreground(SuccessColor).Render("[KEEP]"),
+			bestPath,
+			best.Resolution,
+			formatBytes(best.Size))
+
+		// Inferior file (DELETE)
+		inferior := m.exampleDupe.Files[1]
+		inferiorPath := inferior.Path
+		if len(inferiorPath) > 35 {
+			inferiorPath = "..." + inferiorPath[len(inferiorPath)-32:]
+		}
+		content += fmt.Sprintf("    %s %s  %s  %s\n",
+			lipgloss.NewStyle().Foreground(ErrorColor).Render("[DELETE]"),
+			inferiorPath,
+			inferior.Resolution,
+			formatBytes(inferior.Size))
+		content += "\n"
+	} else {
+		content += lipgloss.NewStyle().Foreground(SuccessColor).Render("  No duplicates detected - your library is clean!") + "\n\n"
+	}
+
+	// Workflow commands section
+	content += lipgloss.NewStyle().Foreground(Primary).Render("WORKFLOW COMMANDS") + "\n"
+	content += lipgloss.NewStyle().Foreground(FgMuted).Render("─────────────────") + "\n"
+	content += fmt.Sprintf("  %s   Refresh database\n", lipgloss.NewStyle().Foreground(Secondary).Render("jellywatch scan"))
+	content += fmt.Sprintf("  %s   List all duplicates\n", lipgloss.NewStyle().Foreground(Secondary).Render("jellywatch duplicates"))
+	content += fmt.Sprintf("  %s   Manage duplicates\n", lipgloss.NewStyle().Foreground(Secondary).Render("jellywatch consolidate"))
+	content += "\n"
+
+	content += lipgloss.NewStyle().Foreground(FgMuted).Italic(true).Render(
+		"Tip: Run 'jellywatch consolidate --dry-run' to preview changes.")
 
 	return content
 }
@@ -1302,7 +1701,29 @@ func (m model) renderComplete() string {
 			for _, err := range m.errors {
 				content += "  " + err + "\n"
 			}
+		} else if m.scanResult != nil {
+			// Fresh install with scan completed
+			content += lipgloss.NewStyle().Foreground(SuccessColor).Bold(true).Render("✓ Installation complete!") + "\n\n"
+			content += "Your library has been scanned and is ready to use.\n\n"
+
+			content += "Quick Commands:\n"
+			if m.scanStats != nil && m.scanStats.DuplicateGroups > 0 {
+				content += fmt.Sprintf("  %s   View %d duplicates found\n",
+					lipgloss.NewStyle().Foreground(Secondary).Render("jellywatch duplicates"),
+					m.scanStats.DuplicateGroups)
+			}
+			content += fmt.Sprintf("  %s   Manage duplicates\n", lipgloss.NewStyle().Foreground(Secondary).Render("jellywatch consolidate"))
+			content += fmt.Sprintf("  %s   Check daemon\n\n", lipgloss.NewStyle().Foreground(Secondary).Render("systemctl status jellywatchd"))
+
+			content += "Config: " + lipgloss.NewStyle().Foreground(FgMuted).Render("~/.config/jellywatch/config.toml") + "\n"
+			content += "Database: " + lipgloss.NewStyle().Foreground(FgMuted).Render("~/.config/jellywatch/media.db") + "\n\n"
+		} else if m.existingDBDetected && !m.forceWizard {
+			// Update without scan
+			content += lipgloss.NewStyle().Foreground(SuccessColor).Bold(true).Render("✓ Update complete!") + "\n\n"
+			content += "Binaries updated. Run " + lipgloss.NewStyle().Foreground(Secondary).Render("jellywatch scan") + " if you want to refresh your database.\n\n"
+			content += "Config: " + lipgloss.NewStyle().Foreground(FgMuted).Render("~/.config/jellywatch/config.toml") + "\n\n"
 		} else {
+			// Fresh install without scan (no libraries configured)
 			content += lipgloss.NewStyle().Foreground(SuccessColor).Bold(true).Render("✓ Installation complete!") + "\n\n"
 			content += "Get Started:\n\n"
 			content += lipgloss.NewStyle().Foreground(Secondary).Render("  jellywatch") + "              Launch CLI\n"
@@ -1320,6 +1741,8 @@ func (m model) getHelpText() string {
 	switch m.step {
 	case stepWelcome:
 		return "↑/↓: Navigate  •  Enter: Continue  •  Q/Ctrl+C: Quit"
+	case stepUpdateNotice:
+		return "↑/↓: Navigate  •  Enter: Continue  •  W: Run wizard  •  Esc: Back  •  Q: Quit"
 	case stepWatchDirs, stepLibraryPaths:
 		return "↑/↓: Switch field  •  Enter: Continue  •  Esc: Back  •  Q: Quit"
 	case stepSonarr, stepRadarr:
@@ -1330,6 +1753,10 @@ func (m model) getHelpText() string {
 		return "↑/↓: Navigate  •  Enter: Confirm  •  Esc: Back  •  Q: Quit"
 	case stepInstalling:
 		return "Installation in progress..."
+	case stepInitialScan:
+		return "Scanning libraries..."
+	case stepScanEducation:
+		return "Press Enter to continue"
 	case stepComplete:
 		return "Enter: Exit  •  Q/Ctrl+C: Quit"
 	default:
@@ -1344,7 +1771,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	p := tea.NewProgram(newModel(), tea.WithAltScreen())
+	m := newModel()
+	p := tea.NewProgram(&m, tea.WithAltScreen())
+	m.program = p
+
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
