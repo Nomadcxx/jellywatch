@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/analyzer"
+	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/library"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/quality"
+	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 )
 
@@ -41,6 +43,8 @@ type Organizer struct {
 	targetGID      int
 	fileMode       os.FileMode
 	dirMode        os.FileMode
+	sonarrClient   *sonarr.Client
+	db             *database.MediaDB // HOLDEN: Database for self-learning
 }
 
 func NewOrganizer(libraries []string, options ...func(*Organizer)) *Organizer {
@@ -53,7 +57,6 @@ func NewOrganizer(libraries []string, options ...func(*Organizer)) *Organizer {
 		dryRun:         false,
 		keepSource:     false,
 		forceOverwrite: false,
-		selector:       library.NewSelector(libraries),
 		transferer:     transferer,
 		timeout:        5 * time.Minute,
 		checksumVerify: false,
@@ -63,9 +66,18 @@ func NewOrganizer(libraries []string, options ...func(*Organizer)) *Organizer {
 		dirMode:        0,
 	}
 
+	// Apply options first (to get sonarrClient and db if provided)
 	for _, opt := range options {
 		opt(org)
 	}
+
+	// Create selector with Sonarr and database integration if available
+	org.selector = library.NewSelectorWithConfig(library.SelectorConfig{
+		Libraries:     libraries,
+		SonarrClient:  org.sonarrClient,
+		CacheDuration: 5 * time.Minute,
+		DB:            org.db,
+	})
 
 	return org
 }
@@ -122,6 +134,20 @@ func WithPermissions(uid, gid int, fileMode, dirMode os.FileMode) func(*Organize
 	}
 }
 
+// WithSonarrClient sets the Sonarr client for intelligent library selection
+func WithSonarrClient(client *sonarr.Client) func(*Organizer) {
+	return func(o *Organizer) {
+		o.sonarrClient = client
+	}
+}
+
+// WithDatabase sets the HOLDEN database for self-learning
+func WithDatabase(db *database.MediaDB) func(*Organizer) {
+	return func(o *Organizer) {
+		o.db = db
+	}
+}
+
 func (o *Organizer) buildTransferOptions() transfer.TransferOptions {
 	return transfer.TransferOptions{
 		Timeout:       o.timeout,
@@ -160,12 +186,11 @@ func (o *Organizer) applyDirOwnership(path string) error {
 	return nil
 }
 
-// OrganizeMovie organizes a movie file according to Jellyfin standards
 func (o *Organizer) OrganizeMovie(sourcePath, libraryPath string) (*OrganizationResult, error) {
 	filename := filepath.Base(sourcePath)
 	sourceQuality := quality.Parse(filename)
 
-	movie, err := naming.ParseMovieName(filename)
+	movie, err := naming.ParseMovieFromPath(sourcePath)
 	if err != nil {
 		return &OrganizationResult{
 			Success:       false,
@@ -251,6 +276,24 @@ func (o *Organizer) OrganizeMovie(sourcePath, libraryPath string) (*Organization
 		}, nil
 	}
 
+	// HOLDEN Phase 3: Self-learning - update database with organized movie
+	if o.db != nil {
+		yearInt := 0
+		if movie.Year != "" {
+			fmt.Sscanf(movie.Year, "%d", &yearInt)
+		}
+		movieRecord := &database.Movie{
+			Title:          movie.Title,
+			Year:           yearInt,
+			CanonicalPath:  movieDir,
+			LibraryRoot:    libraryPath,
+			Source:         "jellywatch",
+			SourcePriority: 100, // Highest priority
+		}
+		_, _ = o.db.UpsertMovie(movieRecord)
+		// Ignore errors - database update is best-effort
+	}
+
 	return &OrganizationResult{
 		Success:         true,
 		SourcePath:      sourcePath,
@@ -267,7 +310,7 @@ func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*Organiza
 	filename := filepath.Base(sourcePath)
 	sourceQuality := quality.Parse(filename)
 
-	tv, err := naming.ParseTVShowName(filename)
+	tv, err := naming.ParseTVShowFromPath(sourcePath)
 	if err != nil {
 		return &OrganizationResult{
 			Success:       false,
@@ -371,6 +414,25 @@ func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*Organiza
 		}, nil
 	}
 
+	// HOLDEN Phase 3: Self-learning - update database with organized TV show
+	if o.db != nil {
+		yearInt := 0
+		if tv.Year != "" {
+			fmt.Sscanf(tv.Year, "%d", &yearInt)
+		}
+		seriesRecord := &database.Series{
+			Title:          tv.Title,
+			Year:           yearInt,
+			CanonicalPath:  showDir,
+			LibraryRoot:    libraryPath,
+			Source:         "jellywatch",
+			SourcePriority: 100, // Highest priority
+			EpisodeCount:   0,   // Will be updated by filesystem sync
+		}
+		_, _ = o.db.UpsertSeries(seriesRecord)
+		// Ignore errors - database update is best-effort
+	}
+
 	return &OrganizationResult{
 		Success:         true,
 		SourcePath:      sourcePath,
@@ -393,8 +455,7 @@ func (o *Organizer) OrganizeTVEpisodeAuto(sourcePath string, getFileSize func(st
 		}, nil
 	}
 
-	filename := filepath.Base(sourcePath)
-	tv, err := naming.ParseTVShowName(filename)
+	tv, err := naming.ParseTVShowFromPath(sourcePath)
 	if err != nil {
 		return &OrganizationResult{
 			Success:    false,

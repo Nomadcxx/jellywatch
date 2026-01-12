@@ -108,14 +108,24 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			logging.F("dir_mode", fmt.Sprintf("%04o", dirMode)))
 	}
 
+	// Create Sonarr client (used for both notifications AND library selection)
+	var sonarrClient *sonarr.Client
 	if cfg.Sonarr.Enabled && cfg.Sonarr.APIKey != "" && cfg.Sonarr.URL != "" {
-		sonarrClient := sonarr.NewClient(sonarr.Config{
+		sonarrClient = sonarr.NewClient(sonarr.Config{
 			URL:     cfg.Sonarr.URL,
 			APIKey:  cfg.Sonarr.APIKey,
 			Timeout: 30 * time.Second,
 		})
-		notifyMgr.Register(notify.NewSonarrNotifier(sonarrClient, cfg.Sonarr.NotifyOnImport))
-		logger.Info("daemon", "Sonarr integration enabled", logging.F("url", cfg.Sonarr.URL))
+
+		// Test connection
+		if err := sonarrClient.Ping(); err != nil {
+			logger.Warn("daemon", "Sonarr connection failed, will continue without intelligent library selection",
+				logging.F("error", err.Error()))
+			sonarrClient = nil // Don't use if connection fails
+		} else {
+			notifyMgr.Register(notify.NewSonarrNotifier(sonarrClient, cfg.Sonarr.NotifyOnImport))
+			logger.Info("daemon", "Sonarr integration enabled", logging.F("url", cfg.Sonarr.URL))
+		}
 	}
 
 	if cfg.Radarr.Enabled && cfg.Radarr.APIKey != "" && cfg.Radarr.URL != "" {
@@ -141,6 +151,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		TargetGID:     targetGID,
 		FileMode:      fileMode,
 		DirMode:       dirMode,
+		SonarrClient:  sonarrClient,
 	})
 
 	healthServer := daemon.NewServer(handler, healthAddr, logger)

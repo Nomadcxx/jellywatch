@@ -108,6 +108,31 @@ func (c *Client) post(endpoint string, payload, result interface{}) error {
 	return nil
 }
 
+func (c *Client) put(endpoint string, payload, result interface{}) error {
+	var body io.Reader
+	if payload != nil {
+		jsonBytes, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("encoding payload: %w", err)
+		}
+		body = bytes.NewReader(jsonBytes)
+	}
+
+	resp, err := c.request(http.MethodPut, endpoint, body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if result != nil {
+		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+			return fmt.Errorf("decoding response: %w", err)
+		}
+	}
+
+	return nil
+}
+
 func (c *Client) delete(endpoint string) error {
 	resp, err := c.request(http.MethodDelete, endpoint, nil)
 	if err != nil {

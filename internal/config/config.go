@@ -30,6 +30,7 @@ type Config struct {
 	Radarr      RadarrConfig      `mapstructure:"radarr"`
 	Logging     LoggingConfig     `mapstructure:"logging"`
 	Permissions PermissionsConfig `mapstructure:"permissions"`
+	AI          AIConfig          `mapstructure:"ai"`
 }
 
 // Helper methods for permissions resolution and parsing
@@ -115,6 +116,17 @@ type LoggingConfig struct {
 	MaxBackups int    `mapstructure:"max_backups"`
 }
 
+// AIConfig contains AI title matching configuration
+type AIConfig struct {
+	Enabled             bool    `mapstructure:"enabled"`
+	OllamaEndpoint      string  `mapstructure:"ollama_endpoint"`
+	Model               string  `mapstructure:"model"`
+	ConfidenceThreshold float64 `mapstructure:"confidence_threshold"`
+	TimeoutSeconds      int     `mapstructure:"timeout_seconds"`
+	CacheEnabled        bool    `mapstructure:"cache_enabled"`
+	CloudModel          string  `mapstructure:"cloud_model"`
+}
+
 // WatchConfig contains directories to watch
 type WatchConfig struct {
 	Movies []string `mapstructure:"movies"`
@@ -187,6 +199,15 @@ func DefaultConfig() *Config {
 			URL:            "",
 			APIKey:         "",
 			NotifyOnImport: true,
+		},
+		AI: AIConfig{
+			Enabled:             false,
+			OllamaEndpoint:      "http://localhost:11434",
+			Model:               "qwen2.5vl:7b",
+			ConfidenceThreshold: 0.8,
+			TimeoutSeconds:      5,
+			CacheEnabled:        true,
+			CloudModel:          "nemotron-3-nano:30b-cloud",
 		},
 		Logging: LoggingConfig{
 			Level:      "info",
@@ -330,6 +351,19 @@ verify_checksums = %v
 delete_source = %v
 
 # ============================================================================
+# AI TITLE MATCHING
+# Optional: Use AI for improved title parsing (requires Ollama)
+# ============================================================================
+[ai]
+enabled = %v
+ollama_endpoint = "%s"
+model = "%s"
+confidence_threshold = %.2f
+timeout_seconds = %d
+cache_enabled = %v
+cloud_model = "%s"
+
+# ============================================================================
 # LOGGING
 # ============================================================================
 [logging]
@@ -356,6 +390,13 @@ max_backups = %d
 		c.Options.DryRun,
 		c.Options.VerifyChecksums,
 		c.Options.DeleteSource,
+		c.AI.Enabled,
+		c.AI.OllamaEndpoint,
+		c.AI.Model,
+		c.AI.ConfidenceThreshold,
+		c.AI.TimeoutSeconds,
+		c.AI.CacheEnabled,
+		c.AI.CloudModel,
 		c.Logging.Level,
 		c.Logging.File,
 		c.Logging.MaxSizeMB,
@@ -392,4 +433,22 @@ func formatStringSlice(s []string) string {
 		quoted[i] = fmt.Sprintf("%q", v)
 	}
 	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+// GetDatabasePath returns the path to the HOLDEN database file
+func GetDatabasePath() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = "."
+	}
+	return filepath.Join(homeDir, ".config", "jellywatch", "media.db")
+}
+
+// GetConfigDir returns the jellywatch config directory
+func GetConfigDir() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = "."
+	}
+	return filepath.Join(homeDir, ".config", "jellywatch")
 }
