@@ -361,14 +361,8 @@ func applyMigrations(db *sql.DB) error {
 			}
 		}
 
-		// Update schema_version
-		if currentVersion > 0 {
-			_, err = tx.Exec("INSERT INTO schema_version (version) VALUES (?)", m.version)
-			if err != nil {
-				tx.Rollback()
-				return err
-			}
-		}
+		// Note: schema_version is updated by the migration's own SQL statements
+		// No need to insert again here - each migration handles its own version insert
 
 		if err := tx.Commit(); err != nil {
 			return err
