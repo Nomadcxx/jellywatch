@@ -113,3 +113,25 @@ func (c *Client) FindEpisode(seriesID, seasonNumber, episodeNumber int) (*Episod
 	return nil, fmt.Errorf("episode S%02dE%02d not found for series %d",
 		seasonNumber, episodeNumber, seriesID)
 }
+
+// UpdateSeriesPath updates the path for a series in Sonarr
+// This is used when JellyWatch moves a series to a new location
+func (c *Client) UpdateSeriesPath(seriesID int, newPath string) error {
+	// First get the existing series
+	series, err := c.GetSeries(seriesID)
+	if err != nil {
+		return fmt.Errorf("getting series for update: %w", err)
+	}
+
+	// Update the path
+	series.Path = newPath
+
+	// PUT the updated series back
+	endpoint := fmt.Sprintf("/api/v3/series/%d", seriesID)
+	var updated Series
+	if err := c.put(endpoint, series, &updated); err != nil {
+		return fmt.Errorf("updating series path: %w", err)
+	}
+
+	return nil
+}

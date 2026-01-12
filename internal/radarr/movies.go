@@ -104,3 +104,25 @@ func (c *Client) DeleteMovieFile(id int) error {
 	}
 	return nil
 }
+
+// UpdateMoviePath updates the path for a movie in Radarr
+// This is used when JellyWatch moves a movie to a new location
+func (c *Client) UpdateMoviePath(movieID int, newPath string) error {
+	// First get the existing movie
+	movie, err := c.GetMovie(movieID)
+	if err != nil {
+		return fmt.Errorf("getting movie for update: %w", err)
+	}
+
+	// Update the path
+	movie.Path = newPath
+
+	// PUT the updated movie back
+	endpoint := fmt.Sprintf("/api/v3/movie/%d", movieID)
+	var updated Movie
+	if err := c.put(endpoint, movie, &updated); err != nil {
+		return fmt.Errorf("updating movie path: %w", err)
+	}
+
+	return nil
+}

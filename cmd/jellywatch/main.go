@@ -56,6 +56,10 @@ Features:
 
 	rootCmd.AddCommand(newOrganizeCmd())
 	rootCmd.AddCommand(newOrganizeFolderCmd())
+	rootCmd.AddCommand(newConsolidateCmd())
+	rootCmd.AddCommand(newDuplicatesCmd())
+	rootCmd.AddCommand(newScanCmd())
+	rootCmd.AddCommand(newStatusCmd())
 	rootCmd.AddCommand(newValidateCmd())
 	rootCmd.AddCommand(newSonarrCmd())
 	rootCmd.AddCommand(newRadarrCmd())

@@ -32,6 +32,32 @@ AGENTS.md
 IMPLEMENTATION.md
 IMPLEMENTATION_PLAN_EXTENDED.md
 IMPLEMENTATION_REMAINING.md
+CLAUDE.md
+CONDOR.md
+DEOBFUSCATE.md
+FALCON.md
+HOLDEN.md
+*_PLAN.md
+*_COMPLETE.md
+*_SUMMARY.md
+*_ANALYSIS.md
+*_REVIEW.md
+*_VERIFICATION.md
+*_INSTRUCTIONS.md
+PHASE_*.md
+PROJECT_*.md
+GAP_*.md
+INSTALLER_*.md
+PERMISSIONS_*.md
+session-*.md
+test-all.sh
+
+# Development directories
+experiments/
+docs/plans/
+docs/session-*.md
+docs/*_PLAN.md
+docs/*-architecture.md
 
 # Development tools
 .claude/

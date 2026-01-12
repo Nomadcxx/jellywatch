@@ -11,6 +11,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/notify"
 	"github.com/Nomadcxx/jellywatch/internal/organizer"
+	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
 	"github.com/Nomadcxx/jellywatch/internal/watcher"
 )
@@ -26,6 +27,7 @@ type MediaHandler struct {
 	dryRun        bool
 	stats         *Stats
 	logger        *logging.Logger
+	sonarrClient  *sonarr.Client
 }
 
 type Stats struct {
@@ -101,6 +103,7 @@ type MediaHandlerConfig struct {
 	TargetGID     int
 	FileMode      os.FileMode
 	DirMode       os.FileMode
+	SonarrClient  *sonarr.Client
 }
 
 func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
@@ -120,6 +123,9 @@ func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
 		organizer.WithTimeout(cfg.Timeout),
 		organizer.WithBackend(cfg.Backend),
 	}
+	if cfg.SonarrClient != nil {
+		orgOpts = append(orgOpts, organizer.WithSonarrClient(cfg.SonarrClient))
+	}
 	if cfg.TargetUID >= 0 || cfg.TargetGID >= 0 || cfg.FileMode != 0 || cfg.DirMode != 0 {
 		orgOpts = append(orgOpts, organizer.WithPermissions(cfg.TargetUID, cfg.TargetGID, cfg.FileMode, cfg.DirMode))
 	}
@@ -135,6 +141,7 @@ func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
 		dryRun:        cfg.DryRun,
 		stats:         NewStats(),
 		logger:        cfg.Logger,
+		sonarrClient:  cfg.SonarrClient,
 	}
 }
 
@@ -180,21 +187,36 @@ func (h *MediaHandler) processFile(path string) {
 	var targetLib string
 	var mediaType notify.MediaType
 
-	if naming.IsTVEpisodeFilename(filename) {
+	isObfuscated := naming.IsObfuscatedFilename(filename)
+	if isObfuscated {
+		h.logger.Info("handler", "Detected obfuscated filename, using folder name", logging.F("filename", filename))
+	}
+
+	isTVEpisode := naming.IsTVEpisodeFromPath(path)
+
+	if isTVEpisode {
 		if len(h.tvLibraries) == 0 {
 			h.logger.Warn("handler", "No TV libraries configured, skipping", logging.F("filename", filename))
 			return
 		}
-		targetLib = h.tvLibraries[0]
 		mediaType = notify.MediaTypeTVEpisode
 
-		if !h.checkTargetHealth(targetLib) {
-			h.logger.Warn("handler", "Target library unhealthy, skipping", logging.F("filename", filename), logging.F("target", targetLib))
-			return
-		}
+		// Use auto-selection (queries Sonarr + filesystem)
+		result, err = h.organizer.OrganizeTVEpisodeAuto(path, func(p string) (int64, error) {
+			info, err := os.Stat(p)
+			if err != nil {
+				return 0, err
+			}
+			return info.Size(), nil
+		})
 
-		result, err = h.organizer.OrganizeTVEpisode(path, targetLib)
-	} else if naming.IsMovieFilename(filename) {
+		// Extract target library from result for health check logging
+		if result != nil && result.TargetPath != "" {
+			// TargetPath format: /mnt/STORAGE1/TVSHOWS/Show Name (Year)/Season 01/episode.mkv
+			// Extract library: /mnt/STORAGE1/TVSHOWS
+			targetLib = filepath.Dir(filepath.Dir(filepath.Dir(result.TargetPath)))
+		}
+	} else {
 		if len(h.movieLibs) == 0 {
 			h.logger.Warn("handler", "No movie libraries configured, skipping", logging.F("filename", filename))
 			return
@@ -208,9 +230,6 @@ func (h *MediaHandler) processFile(path string) {
 		}
 
 		result, err = h.organizer.OrganizeMovie(path, targetLib)
-	} else {
-		h.logger.Warn("handler", "Cannot determine media type", logging.F("filename", filename))
-		return
 	}
 
 	if err != nil {
