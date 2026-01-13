@@ -326,6 +326,7 @@ func (m *model) initTasks() {
 			{name: "Stop daemon", description: "Stopping jellywatchd service", execute: stopDaemon, status: statusPending, optional: true},
 			{name: "Remove binaries", description: "Removing /usr/local/bin/jellywatch*", execute: removeBinaries, status: statusPending},
 			{name: "Remove systemd files", description: "Removing systemd service file", execute: removeSystemdFiles, status: statusPending},
+			{name: "Remove config & database", description: "Removing ~/.config/jellywatch (WARNING: deletes all data)", execute: removeConfigAndDB, status: statusPending, optional: true},
 		}
 	} else {
 		m.tasks = []installTask{
@@ -606,6 +607,21 @@ func removeSystemdFiles(m *model) error {
 	cmd := exec.Command("systemctl", "daemon-reload")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to reload systemd: %w", err)
+	}
+
+	return nil
+}
+
+func removeConfigAndDB(m *model) error {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return fmt.Errorf("failed to get config dir: %w", err)
+	}
+
+	jellywatchDir := filepath.Join(configDir, "jellywatch")
+
+	if err := os.RemoveAll(jellywatchDir); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove config directory: %w", err)
 	}
 
 	return nil
