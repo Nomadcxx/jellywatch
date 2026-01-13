@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"time"
@@ -191,9 +192,25 @@ type scanCompleteMsg struct {
 
 // detectExistingInstall checks if jellywatch is already installed
 func detectExistingInstall() (exists bool, dbPath string, modTime time.Time) {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		return false, "", time.Time{}
+	// Get the actual user's config dir, even if running with sudo
+	var configDir string
+
+	// If running with sudo, get the original user's home directory
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		// Running with sudo - get original user's home
+		userInfo, err := user.Lookup(sudoUser)
+		if err == nil {
+			configDir = filepath.Join(userInfo.HomeDir, ".config")
+		}
+	}
+
+	// Fallback to standard method
+	if configDir == "" {
+		var err error
+		configDir, err = os.UserConfigDir()
+		if err != nil {
+			return false, "", time.Time{}
+		}
 	}
 
 	dbPath = filepath.Join(configDir, "jellywatch", "media.db")
