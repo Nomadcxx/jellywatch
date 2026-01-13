@@ -446,6 +446,13 @@ func createConfig(m *model) error {
 
 	configPath := filepath.Join(configDir, "config.toml")
 
+	// Check if config already exists - don't overwrite during updates
+	if _, err := os.Stat(configPath); err == nil {
+		// Config exists - skip writing to preserve user's settings
+		return nil
+	}
+
+	// Config doesn't exist - create new one
 	configContent := generateConfig(m)
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
