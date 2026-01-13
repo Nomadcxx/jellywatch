@@ -66,6 +66,7 @@ Features:
 	rootCmd.AddCommand(newWatchCmd())
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newConfigCmd())
+	rootCmd.AddCommand(newDatabaseCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
