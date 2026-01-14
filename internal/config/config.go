@@ -125,6 +125,8 @@ type AIConfig struct {
 	TimeoutSeconds      int     `mapstructure:"timeout_seconds"`
 	CacheEnabled        bool    `mapstructure:"cache_enabled"`
 	CloudModel          string  `mapstructure:"cloud_model"`
+	// New fields for compliance/consolidation
+	AutoResolveRisky    bool    `mapstructure:"auto_resolve_risky"`
 }
 
 // WatchConfig contains directories to watch
@@ -208,6 +210,7 @@ func DefaultConfig() *Config {
 			TimeoutSeconds:      5,
 			CacheEnabled:        true,
 			CloudModel:          "nemotron-3-nano:30b-cloud",
+			AutoResolveRisky:    false,
 		},
 		Logging: LoggingConfig{
 			Level:      "info",
