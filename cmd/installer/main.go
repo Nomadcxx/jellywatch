@@ -1804,6 +1804,39 @@ func (m model) getHelpText() string {
 	}
 }
 
+// discoverOllamaModels queries Ollama for available models
+// This helper can be used by installer CLI or future TUI integration
+func discoverOllamaModels(endpoint string) ([]string, error) {
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	resp, err := client.Get(endpoint + "/api/tags")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ollama returned status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	var models []string
+	for _, m := range result.Models {
+		models = append(models, m.Name)
+	}
+
+	return models, nil
+}
+
 func main() {
 	if os.Geteuid() != 0 {
 		fmt.Println("Error: This installer must be run as root")
