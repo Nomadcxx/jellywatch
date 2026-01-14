@@ -3,7 +3,7 @@ package database
 import "database/sql"
 
 // Schema version for migrations
-const currentSchemaVersion = 5
+const currentSchemaVersion = 6
 
 // SQL migration scripts
 var migrations = []migration{
@@ -322,6 +322,48 @@ var migrations = []migration{
 
 			// Update schema version
 			`INSERT INTO schema_version (version) VALUES (5)`,
+		},
+	},
+	{
+		version: 6,
+		up: []string{
+			// Skipped items table - queue for manual/AI review
+			`CREATE TABLE skipped_items (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				path TEXT NOT NULL UNIQUE,
+				skip_reason TEXT NOT NULL CHECK(skip_reason IN ('parse_failure', 'no_quality_winner', 'ambiguous_title', 'ai_failed')),
+				error_details TEXT,
+				ai_attempted BOOLEAN DEFAULT FALSE,
+				ai_result TEXT,
+				attempts INTEGER DEFAULT 0,
+				status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'resolved', 'ignored')),
+				resolution TEXT,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			)`,
+
+			`CREATE INDEX idx_skipped_status ON skipped_items(status)`,
+			`CREATE INDEX idx_skipped_reason ON skipped_items(skip_reason)`,
+			`CREATE INDEX idx_skipped_created ON skipped_items(created_at)`,
+
+			// Operations log table - audit trail
+			`CREATE TABLE operations_log (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				operation_type TEXT NOT NULL CHECK(operation_type IN ('keep', 'delete', 'move', 'rename', 'reorganize', 'skip')),
+				source_path TEXT NOT NULL,
+				target_path TEXT,
+				reason TEXT,
+				quality_score_source INTEGER,
+				quality_score_winner INTEGER,
+				bytes_freed INTEGER,
+				executed_by TEXT NOT NULL CHECK(executed_by IN ('daemon', 'cli', 'user')),
+				executed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+			)`,
+
+			`CREATE INDEX idx_operations_type ON operations_log(operation_type)`,
+			`CREATE INDEX idx_operations_executed ON operations_log(executed_at DESC)`,
+
+			`INSERT INTO schema_version (version) VALUES (6)`,
 		},
 	},
 }
