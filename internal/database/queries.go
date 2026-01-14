@@ -1,6 +1,7 @@
 package database
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 )
@@ -452,4 +453,73 @@ func (m *MediaDB) GetMediaFilesByLibrary(libraryRoot string) ([]*MediaFile, erro
 	}
 
 	return files, rows.Err()
+}
+
+// FindSeriesLocations returns all library roots where a series exists
+func (m *MediaDB) FindSeriesLocations(normalizedTitle string, year int) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	rows, err := m.db.Query(`
+		SELECT DISTINCT library_root FROM media_files
+		WHERE normalized_title = ? AND year = ? AND media_type = 'episode'
+	`, normalizedTitle, year)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var locations []string
+	for rows.Next() {
+		var loc string
+		if err := rows.Scan(&loc); err != nil {
+			return nil, err
+		}
+		locations = append(locations, loc)
+	}
+
+	return locations, rows.Err()
+}
+
+// CountEpisodesInLibrary counts episodes for a series in a specific library
+func (m *MediaDB) CountEpisodesInLibrary(library, normalizedTitle string, year int) (int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var count int
+	err := m.db.QueryRow(`
+		SELECT COUNT(DISTINCT season || '-' || episode) FROM media_files
+		WHERE library_root = ? AND normalized_title = ? AND year = ? AND media_type = 'episode'
+	`, library, normalizedTitle, year).Scan(&count)
+
+	return count, err
+}
+
+// GetBestMovieFile returns the highest quality file for a movie
+func (m *MediaDB) GetBestMovieFile(normalizedTitle string, year int) (*MediaFile, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	row := m.db.QueryRow(`
+		SELECT id, path, size, media_type, normalized_title, year,
+		       resolution, source_type, quality_score, library_root
+		FROM media_files
+		WHERE normalized_title = ? AND year = ? AND media_type = 'movie'
+		ORDER BY quality_score DESC
+		LIMIT 1
+	`, normalizedTitle, year)
+
+	var mf MediaFile
+	err := row.Scan(
+		&mf.ID, &mf.Path, &mf.Size, &mf.MediaType, &mf.NormalizedTitle, &mf.Year,
+		&mf.Resolution, &mf.SourceType, &mf.QualityScore, &mf.LibraryRoot,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return &mf, nil
 }
