@@ -269,3 +269,135 @@ func isValidSeasonFolder(folder string) bool {
 
 	return true
 }
+
+// ComplianceSuggestion contains the suggested compliant path and action
+type ComplianceSuggestion struct {
+	OriginalPath  string
+	SuggestedPath string
+	Action        string   // "rename", "move", or "reorganize"
+	Description   string
+	Issues        []string
+	IsSafeAutoFix bool     // true if this is a low-risk fix (case/punctuation only)
+}
+
+// SuggestCompliantPath returns a suggested Jellyfin-compliant path for a file
+func (c *Checker) SuggestCompliantPath(fullPath string) (*ComplianceSuggestion, error) {
+	filename := filepath.Base(fullPath)
+	ext := filepath.Ext(filename)
+	if ext != "" {
+		ext = ext[1:] // Remove leading dot
+	}
+
+	// Check current compliance
+	result := c.CheckFile(fullPath)
+	if result.IsCompliant {
+		return nil, nil // Already compliant
+	}
+
+	suggestion := &ComplianceSuggestion{
+		OriginalPath: fullPath,
+		Issues:       result.Issues,
+	}
+
+	// Determine media type and compute correct path
+	if naming.IsTVEpisodeFilename(filename) {
+		return c.suggestTVPath(fullPath, ext, suggestion)
+	}
+
+	if naming.IsMovieFilename(filename) {
+		return c.suggestMoviePath(fullPath, ext, suggestion)
+	}
+
+	return nil, fmt.Errorf("unable to determine media type for: %s", filename)
+}
+
+func (c *Checker) suggestMoviePath(fullPath, ext string, suggestion *ComplianceSuggestion) (*ComplianceSuggestion, error) {
+	filename := filepath.Base(fullPath)
+	currentFolder := filepath.Base(filepath.Dir(fullPath))
+	libraryRoot := filepath.Dir(filepath.Dir(fullPath))
+
+	movie, err := naming.ParseMovieName(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse movie name: %w", err)
+	}
+
+	correctFolder := naming.NormalizeMovieName(movie.Title, movie.Year)
+	correctFilename := naming.FormatMovieFilename(movie.Title, movie.Year, ext)
+	correctPath := filepath.Join(libraryRoot, correctFolder, correctFilename)
+
+	suggestion.SuggestedPath = correctPath
+
+	folderDiff := currentFolder != correctFolder
+	fileDiff := filename != correctFilename
+
+	if folderDiff && fileDiff {
+		suggestion.Action = "reorganize"
+		suggestion.Description = fmt.Sprintf("Move to: %s/%s", correctFolder, correctFilename)
+	} else if folderDiff {
+		suggestion.Action = "move"
+		suggestion.Description = fmt.Sprintf("Move to folder: %s", correctFolder)
+	} else {
+		suggestion.Action = "rename"
+		suggestion.Description = fmt.Sprintf("Rename to: %s", correctFilename)
+	}
+
+	suggestion.IsSafeAutoFix = isCaseOrPunctuationOnly(currentFolder, correctFolder) &&
+		isCaseOrPunctuationOnly(filename, correctFilename)
+
+	return suggestion, nil
+}
+
+func (c *Checker) suggestTVPath(fullPath, ext string, suggestion *ComplianceSuggestion) (*ComplianceSuggestion, error) {
+	filename := filepath.Base(fullPath)
+	seasonFolder := filepath.Base(filepath.Dir(fullPath))
+	showFolder := filepath.Base(filepath.Dir(filepath.Dir(fullPath)))
+	libraryRoot := filepath.Dir(filepath.Dir(filepath.Dir(fullPath)))
+
+	tv, err := naming.ParseTVShowName(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse TV show name: %w", err)
+	}
+
+	correctShowFolder := naming.NormalizeTVShowName(tv.Title, tv.Year)
+	correctSeasonFolder := naming.FormatSeasonFolder(tv.Season)
+	correctFilename := naming.FormatTVEpisodeFilename(tv.Title, tv.Year, tv.Season, tv.Episode, ext)
+	correctPath := filepath.Join(libraryRoot, correctShowFolder, correctSeasonFolder, correctFilename)
+
+	suggestion.SuggestedPath = correctPath
+
+	showDiff := showFolder != correctShowFolder
+	seasonDiff := seasonFolder != correctSeasonFolder
+	fileDiff := filename != correctFilename
+
+	if showDiff || seasonDiff {
+		if fileDiff {
+			suggestion.Action = "reorganize"
+			suggestion.Description = fmt.Sprintf("Move to: %s/%s/%s", correctShowFolder, correctSeasonFolder, correctFilename)
+		} else {
+			suggestion.Action = "move"
+			suggestion.Description = fmt.Sprintf("Move to: %s/%s/", correctShowFolder, correctSeasonFolder)
+		}
+	} else {
+		suggestion.Action = "rename"
+		suggestion.Description = fmt.Sprintf("Rename to: %s", correctFilename)
+	}
+
+	suggestion.IsSafeAutoFix = isCaseOrPunctuationOnly(showFolder, correctShowFolder) &&
+		isCaseOrPunctuationOnly(seasonFolder, correctSeasonFolder) &&
+		isCaseOrPunctuationOnly(filename, correctFilename)
+
+	return suggestion, nil
+}
+
+// isCaseOrPunctuationOnly returns true if the only differences are case or minor punctuation
+func isCaseOrPunctuationOnly(original, suggested string) bool {
+	// Normalize: lowercase, remove common punctuation variations
+	normalize := func(s string) string {
+		s = strings.ToLower(s)
+		s = strings.ReplaceAll(s, ".", "")
+		s = strings.ReplaceAll(s, "'", "")
+		s = strings.ReplaceAll(s, "'", "")
+		return s
+	}
+	return normalize(original) == normalize(suggested)
+}
