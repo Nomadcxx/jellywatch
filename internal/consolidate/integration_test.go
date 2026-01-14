@@ -4,8 +4,10 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/Nomadcxx/jellywatch/internal/compliance"
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/consolidate"
 	"github.com/Nomadcxx/jellywatch/internal/database"
@@ -82,4 +84,45 @@ func TestIntegrationConsolidator(t *testing.T) {
 
 	t.Logf("Integration test passed. Basic consolidator operations work correctly.")
 	t.Logf("Note: Full conflict detection requires multiple series entries, which is prevented by UNIQUE constraint.")
+}
+
+func TestComplianceWorkflow(t *testing.T) {
+	// Create temp directory structure with non-compliant files
+	tmpDir := t.TempDir()
+
+	// Create non-compliant movie folder
+	movieDir := filepath.Join(tmpDir, "Movies", "The Matrix 1999") // Missing parentheses
+	err := os.MkdirAll(movieDir, 0755)
+	if err != nil {
+		t.Fatalf("Failed to create movie dir: %v", err)
+	}
+
+	movieFile := filepath.Join(movieDir, "The Matrix 1999.mkv")
+	err = os.WriteFile(movieFile, []byte("test"), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create movie file: %v", err)
+	}
+
+	// Run compliance check
+	checker := compliance.NewChecker(filepath.Join(tmpDir, "Movies"))
+	suggestion, err := checker.SuggestCompliantPath(movieFile)
+
+	if err != nil {
+		t.Fatalf("SuggestCompliantPath failed: %v", err)
+	}
+
+	if suggestion == nil {
+		t.Fatal("Expected non-nil suggestion")
+	}
+
+	if suggestion.Action != "reorganize" {
+		t.Errorf("Expected action 'reorganize', got '%s'", suggestion.Action)
+	}
+
+	// Check that suggested path contains properly formatted year
+	if !strings.Contains(suggestion.SuggestedPath, "(1999)") {
+		t.Errorf("Expected suggested path to contain '(1999)', got '%s'", suggestion.SuggestedPath)
+	}
+
+	t.Logf("Compliance workflow test passed. Suggestion: %s", suggestion.SuggestedPath)
 }
