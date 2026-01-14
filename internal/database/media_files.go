@@ -408,3 +408,16 @@ func (m *MediaDB) UpdateEpisodeBestFile(episodeID int64, fileID *int64) error {
 
 	return nil
 }
+
+// UpdateMediaFilePath updates a file's path after rename/move
+func (m *MediaDB) UpdateMediaFilePath(oldPath, newPath string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	_, err := m.db.Exec(`
+		UPDATE media_files SET path = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE path = ?
+	`, newPath, oldPath)
+
+	return err
+}
