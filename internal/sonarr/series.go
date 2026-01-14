@@ -2,6 +2,7 @@ package sonarr
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -134,4 +135,23 @@ func (c *Client) UpdateSeriesPath(seriesID int, newPath string) error {
 	}
 
 	return nil
+}
+
+// GetSeriesByPath finds a series by its filesystem path
+func (c *Client) GetSeriesByPath(path string) (*Series, error) {
+	series, err := c.GetAllSeries()
+	if err != nil {
+		return nil, err
+	}
+
+	// Normalize path for comparison
+	path = filepath.Clean(path)
+
+	for _, s := range series {
+		if filepath.Clean(s.Path) == path {
+			return &s, nil
+		}
+	}
+
+	return nil, nil
 }

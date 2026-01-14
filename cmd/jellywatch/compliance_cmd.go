@@ -2,12 +2,14 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/Nomadcxx/jellywatch/internal/compliance"
 	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/jellywatch/internal/consolidate"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/spf13/cobra"
 )
@@ -56,6 +58,12 @@ Examples:
 }
 
 func runCompliance(fixDry, fix, safeOnly, moviesOnly, tvOnly bool) error {
+	// Load config
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
 	// Open database
 	dbPath := config.GetDatabasePath()
 	db, err := database.OpenPath(dbPath)
@@ -179,6 +187,28 @@ func runCompliance(fixDry, fix, safeOnly, moviesOnly, tvOnly bool) error {
 	}
 
 	fmt.Printf("\nResult: %d fixed, %d skipped, %d failed\n", fixed, skipped, failed)
+
+	// Notify Sonarr/Radarr of changes
+	if fixed > 0 {
+		notifier := consolidate.NewNotifier(cfg, slog.Default(), false)
+
+		var tvPaths, moviePaths []string
+		for _, s := range suggestions {
+			if s.IsSafeAutoFix || !safeOnly {
+				if strings.Contains(s.SuggestedPath, "/Season") || strings.Contains(s.SuggestedPath, "\\Season") {
+					tvPaths = append(tvPaths, s.SuggestedPath)
+				} else {
+					moviePaths = append(moviePaths, s.SuggestedPath)
+				}
+			}
+		}
+
+		if err := notifier.NotifyBulkComplete(tvPaths, moviePaths); err != nil {
+			fmt.Printf("Warning: some *arr notifications failed: %v\n", err)
+		} else if len(tvPaths) > 0 || len(moviePaths) > 0 {
+			fmt.Println("Sonarr/Radarr notified of changes")
+		}
+	}
 
 	return nil
 }

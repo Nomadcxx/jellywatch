@@ -3,6 +3,7 @@ package radarr
 import (
 	"fmt"
 	"net/url"
+	"path/filepath"
 )
 
 func (c *Client) GetMovies() ([]Movie, error) {
@@ -125,4 +126,23 @@ func (c *Client) UpdateMoviePath(movieID int, newPath string) error {
 	}
 
 	return nil
+}
+
+// GetMovieByPath finds a movie by its filesystem path
+func (c *Client) GetMovieByPath(path string) (*Movie, error) {
+	movies, err := c.GetMovies()
+	if err != nil {
+		return nil, err
+	}
+
+	// Normalize path for comparison
+	path = filepath.Clean(path)
+
+	for _, m := range movies {
+		if filepath.Clean(m.Path) == path {
+			return &m, nil
+		}
+	}
+
+	return nil, nil
 }
