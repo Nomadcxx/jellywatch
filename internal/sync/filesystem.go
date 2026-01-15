@@ -22,7 +22,7 @@ func (s *SyncService) SyncFromFilesystem(ctx context.Context) error {
 	}
 
 	// Create file scanner for file-level scanning (Phase 4: CONDOR system)
-	fileScanner := scanner.NewFileScanner(s.db)
+	fileScanner := scanner.NewFileScanner(s.db, nil)
 
 	// Scan files into media_files table
 	s.logger.Info("scanning files into media_files table")

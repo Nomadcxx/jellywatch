@@ -49,6 +49,7 @@ const (
 	stepLibraryPaths
 	stepSonarr
 	stepRadarr
+	stepAI           // NEW: AI configuration step
 	stepPermissions
 	stepConfirm
 	stepInstalling
@@ -117,12 +118,26 @@ type model struct {
 	permFileMode string
 	permDirMode  string
 
+	// AI configuration
+	aiEnabled         bool
+	aiOllamaURL       string
+	aiModel           string
+	aiModels          []string     // Available models from Ollama
+	aiModelIndex      int          // Currently selected model index
+	aiModelDropdownOpen bool        // Is model dropdown open?
+	aiTestResult       string       // Result of testing Ollama connection
+	aiTesting         bool         // Currently testing connection
+	aiOllamaInstalled bool         // Whether Ollama is detected as installed
+	aiInstallingOllama bool         // Currently installing Ollama
+	aiInstallResult   string       // Result of Ollama installation attempt
+
 	// Installation mode detection
 	existingDBDetected bool
 	existingDBPath     string
 	existingDBModTime  time.Time
 	updateWithRefresh  bool       // true = update + rescan, false = update only
 	forceWizard        bool       // 'W' key pressed to run full wizard
+	daemonWasRunning   bool       // true if daemon was running before update (to restart after)
 
 	// Scan state
 	scanProgress    ScanProgress
@@ -167,6 +182,19 @@ type apiTestResultMsg struct {
 	service string
 	success bool
 	version string
+	err     error
+}
+
+// Ollama test result message
+type ollamaTestResultMsg struct {
+	success bool
+	models  []string
+	err     error
+}
+
+// Ollama install result message
+type ollamaInstallResultMsg struct {
+	success bool
 	err     error
 }
 
@@ -240,6 +268,14 @@ func newModel() model {
 		// Default values
 		sonarrEnabled:    false,
 		radarrEnabled:    false,
+		// AI defaults
+		aiEnabled:         false,
+		aiOllamaURL:       "http://localhost:11434",
+		aiModel:           "",
+		aiModels:          []string{},
+		aiModelIndex:      0,
+		aiModelDropdownOpen: false,
+		aiOllamaInstalled: checkOllamaInstalled(),
 		existingDBDetected: exists,
 		existingDBPath:     dbPath,
 		existingDBModTime:  modTime,
@@ -393,6 +429,24 @@ func buildBinaries(m *model) error {
 }
 
 func installBinaries(m *model) error {
+	// Check if jellywatchd is currently running
+	wasRunning := false
+	if _, err := os.Stat("/usr/local/bin/jellywatchd"); err == nil {
+		// Check service status
+		cmd := exec.Command("systemctl", "is-active", "jellywatchd")
+		output, _ := cmd.Output()
+		if strings.TrimSpace(string(output)) == "active" {
+			wasRunning = true
+			// Stop the service before replacing binaries
+			if err := exec.Command("systemctl", "stop", "jellywatchd").Run(); err != nil {
+				// If stop fails, try kill
+				exec.Command("killall", "jellywatchd").Run()
+			}
+			// Give it a moment to fully stop
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
 	binaries := []string{"jellywatch", "jellywatchd"}
 	for _, binary := range binaries {
 		src := filepath.Join(".", binary)
@@ -407,6 +461,9 @@ func installBinaries(m *model) error {
 			return fmt.Errorf("failed to install %s: %w", binary, err)
 		}
 	}
+
+	// Store whether we need to restart the daemon later
+	m.daemonWasRunning = wasRunning
 
 	return nil
 }
@@ -516,6 +573,20 @@ func generateConfig(m *model) string {
 		sb.WriteString("\n")
 	}
 
+	if m.aiEnabled {
+		sb.WriteString("[ai]\n")
+		sb.WriteString("enabled = true\n")
+		sb.WriteString(fmt.Sprintf("ollama_endpoint = \"%s\"\n", m.aiOllamaURL))
+		if m.aiModel != "" {
+			sb.WriteString(fmt.Sprintf("model = \"%s\"\n", m.aiModel))
+		}
+		sb.WriteString("confidence_threshold = 0.7\n")
+		sb.WriteString("timeout_seconds = 30\n")
+		sb.WriteString("cache_enabled = true\n")
+		sb.WriteString("auto_resolve_risky = true\n")
+		sb.WriteString("\n")
+	}
+
 	sb.WriteString("[daemon]\n")
 	sb.WriteString("enabled = true\n")
 	sb.WriteString("scan_frequency = \"5m\"\n")
@@ -584,6 +655,11 @@ func enableDaemon(m *model) error {
 		return fmt.Errorf("failed to enable service: %w", err)
 	}
 
+	// If the service was recently stopped (during binary update), wait a moment before starting
+	if m.daemonWasRunning {
+		time.Sleep(500 * time.Millisecond)
+	}
+
 	cmd = exec.Command("systemctl", "start", "jellywatchd")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to start service: %w", err)
@@ -624,6 +700,21 @@ func removeBinaries(m *model) error {
 func removeSystemdFiles(m *model) error {
 	servicePath := "/etc/systemd/system/jellywatchd.service"
 
+	// Stop and disable the service BEFORE removing the service file
+	// Use systemctl is-active to check if service is running
+	checkCmd := exec.Command("systemctl", "is-active", "jellywatchd")
+	if output, _ := checkCmd.Output(); strings.TrimSpace(string(output)) == "active" {
+		// Service is running, stop it
+		if err := exec.Command("systemctl", "stop", "jellywatchd").Run(); err != nil {
+			// Log warning but continue
+			fmt.Printf("Warning: failed to stop jellywatchd service: %v\n", err)
+		}
+	}
+
+	// Disable the service
+	exec.Command("systemctl", "disable", "jellywatchd").Run() // Ignore errors, service might not be enabled
+
+	// Now remove the service file
 	if err := os.Remove(servicePath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove service file: %w", err)
 	}
@@ -714,6 +805,19 @@ func (m *model) initInputsForStep() {
 
 		m.inputs = []textinput.Model{urlInput, apiInput}
 
+	case stepAI:
+		if m.aiEnabled {
+			// Ollama URL input
+			urlInput := textinput.New()
+			urlInput.Placeholder = "http://localhost:11434"
+			urlInput.Focus()
+			urlInput.Width = 50
+			urlInput.SetValue(m.aiOllamaURL)
+			m.inputs = []textinput.Model{urlInput}
+		} else {
+			m.inputs = []textinput.Model{}
+		}
+
 	case stepPermissions:
 		userInput := textinput.New()
 		userInput.Placeholder = "jellyfin (username or UID)"
@@ -770,6 +874,11 @@ func (m *model) saveInputsFromStep() {
 			m.radarrURL = strings.TrimSpace(m.inputs[0].Value())
 			m.radarrAPIKey = strings.TrimSpace(m.inputs[1].Value())
 		}
+	case stepAI:
+		// Save Ollama URL from text input
+		if len(m.inputs) >= 1 {
+			m.aiOllamaURL = strings.TrimSpace(m.inputs[0].Value())
+		}
 	case stepPermissions:
 		if len(m.inputs) >= 4 {
 			m.permUser = strings.TrimSpace(m.inputs[0].Value())
@@ -817,6 +926,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedOption--
 			} else if m.step == stepUpdateNotice && m.selectedOption > 0 {
 				m.selectedOption--
+			} else if m.step == stepAI && m.aiModelDropdownOpen {
+				if m.aiModelIndex > 0 {
+					m.aiModelIndex--
+					if len(m.aiModels) > 0 {
+						m.aiModel = m.aiModels[m.aiModelIndex]
+					}
+				}
+				return m, nil
 			} else if m.step == stepSonarr || m.step == stepRadarr {
 				if m.focusedInput == 1 && m.selectedOption > 0 {
 					m.selectedOption--
@@ -833,6 +950,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedOption++
 			} else if m.step == stepUpdateNotice && m.selectedOption < 1 {
 				m.selectedOption++
+			} else if m.step == stepAI && m.aiModelDropdownOpen {
+				if m.aiModelIndex < len(m.aiModels)-1 {
+					m.aiModelIndex++
+					if len(m.aiModels) > 0 {
+						m.aiModel = m.aiModels[m.aiModelIndex]
+					}
+				}
+				return m, nil
 			} else if m.step == stepSonarr || m.step == stepRadarr {
 				if m.focusedInput == 1 && m.selectedOption < 1 {
 					m.selectedOption++
@@ -874,6 +999,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.testError = ""
 					return m, testRadarr(m.radarrURL, m.radarrAPIKey)
 				}
+			} else if m.step == stepAI && !m.aiTesting && !m.aiModelDropdownOpen {
+				// Test Ollama connection and fetch models
+				m.aiTesting = true
+				m.aiTestResult = ""
+				return m, testOllama(m.aiOllamaURL)
+			}
+		case "e":
+			if m.step == stepAI && !m.aiModelDropdownOpen {
+				// Toggle AI enabled/disabled
+				m.aiEnabled = !m.aiEnabled
+				if m.aiEnabled {
+					// Initialize inputs when enabling AI
+					m.initInputsForStep()
+					m.focusedInput = 0
+					if len(m.inputs) > 0 {
+						m.inputs[0].Focus()
+					}
+					// Auto-fetch models when enabling (only if Ollama is installed)
+					if m.aiOllamaInstalled {
+						m.aiTesting = true
+						m.aiTestResult = ""
+						return m, testOllama(m.aiOllamaURL)
+					}
+				} else {
+					// Clear model selection when disabled
+					m.aiModel = ""
+					m.aiModels = []string{}
+					m.aiModelIndex = 0
+					m.aiTestResult = ""
+					m.inputs = []textinput.Model{}
+				}
+			}
+		case "i":
+			if m.step == stepAI && !m.aiInstallingOllama && !m.aiOllamaInstalled {
+				// Install Ollama
+				m.aiInstallingOllama = true
+				m.aiInstallResult = ""
+				return m, installOllama()
 			}
 		case "enter":
 			if m.step == stepWelcome {
@@ -898,6 +1061,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						executeTask(0, &m),
 					)
 				}
+				return m, nil
+			} else if m.step == stepAI {
+				if m.aiModelDropdownOpen {
+					// Close dropdown and confirm selection
+					m.aiModelDropdownOpen = false
+					if len(m.aiModels) > 0 && m.aiModelIndex < len(m.aiModels) {
+						m.aiModel = m.aiModels[m.aiModelIndex]
+					}
+					return m, nil
+				} else if m.aiEnabled && len(m.aiModels) > 0 {
+					// Open dropdown to select model
+					m.aiModelDropdownOpen = true
+					return m, nil
+				}
+				// Continue to next step
+				m.step = stepPermissions
+				m.initInputsForStep()
 				return m, nil
 			} else if m.step == stepUpdateNotice {
 				switch msg.String() {
@@ -936,7 +1116,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.step == stepRadarr {
 				m.saveInputsFromStep()
 				m.radarrEnabled = len(m.radarrURL) > 0 && len(m.radarrAPIKey) > 0
-				m.step = stepPermissions
+				m.step = stepAI
 				m.initInputsForStep()
 				return m, nil
 			} else if m.step == stepPermissions {
@@ -968,7 +1148,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		case "esc":
-			if m.step != stepWelcome && m.step != stepInstalling && m.step != stepComplete && m.step != stepUpdateNotice {
+			if m.step == stepAI && m.aiModelDropdownOpen {
+				// Close dropdown but stay on AI step
+				m.aiModelDropdownOpen = false
+				return m, nil
+			} else if m.step != stepWelcome && m.step != stepInstalling && m.step != stepComplete && m.step != stepUpdateNotice {
 				prevStep := m.step - 1
 				if prevStep < stepWelcome {
 					prevStep = stepWelcome
@@ -1008,6 +1192,36 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.radarrVersion = ""
 				m.testError = msg.err.Error()
 			}
+		}
+		return m, nil
+
+	case ollamaTestResultMsg:
+		m.aiTesting = false
+		if msg.success {
+			m.aiTestResult = fmt.Sprintf("Found %d models", len(msg.models))
+			m.aiModels = msg.models
+			if len(msg.models) > 0 && m.aiModel == "" {
+				m.aiModel = msg.models[0]
+				m.aiModelIndex = 0
+			}
+		} else {
+			m.aiTestResult = fmt.Sprintf("Connection failed: %s", msg.err.Error())
+			m.aiModels = []string{}
+		}
+		return m, nil
+
+	case ollamaInstallResultMsg:
+		m.aiInstallingOllama = false
+		if msg.success {
+			m.aiOllamaInstalled = true
+			m.aiInstallResult = "Ollama installed successfully!"
+			// Auto-test connection after successful installation
+			m.aiTesting = true
+			m.aiTestResult = ""
+			return m, testOllama(m.aiOllamaURL)
+		} else {
+			m.aiOllamaInstalled = false
+			m.aiInstallResult = fmt.Sprintf("Installation failed: %s", msg.err.Error())
 		}
 		return m, nil
 
@@ -1134,6 +1348,8 @@ func (m model) View() string {
 		mainContent = m.renderSonarr()
 	case stepRadarr:
 		mainContent = m.renderRadarr()
+	case stepAI:
+		mainContent = m.renderAI()
 	case stepPermissions:
 		mainContent = m.renderPermissions()
 	case stepConfirm:
@@ -1273,7 +1489,7 @@ func (m *model) runInitialScan() tea.Cmd {
 		}
 		defer db.Close()
 
-		fileScanner := scanner.NewFileScanner(db)
+		fileScanner := scanner.NewFileScanner(db, nil)
 
 		// Build library lists from config
 		var tvLibs, movieLibs []string
@@ -1574,6 +1790,138 @@ func (m model) renderRadarr() string {
 	return content
 }
 
+func (m model) renderAI() string {
+	var content string
+
+	content += lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("AI Configuration (Optional)") + "\n\n"
+	content += "Configure local AI for improved title matching and edge case resolution.\n\n"
+
+	// Enable/Disable toggle AT THE TOP
+	checkbox := "[  ]"
+	if m.aiEnabled {
+		checkbox = lipgloss.NewStyle().Foreground(SuccessColor).Render("[✓]")
+	}
+	content += checkbox + " Enable fallback AI for improved title matching"
+	if !m.aiModelDropdownOpen {
+		content += lipgloss.NewStyle().Foreground(FgMuted).Render(" (Press 'e' to toggle)")
+	}
+	content += "\n"
+
+	// Show configuration if enabled
+	if m.aiEnabled {
+		content += "\n"
+
+		// Check Ollama installation first - if not installed, show only installation prompt
+		if !m.aiOllamaInstalled && !m.aiInstallingOllama {
+			distro := detectDistro()
+			content += fmt.Sprintf("\n%s Ollama is required but not detected on this system (%s).\n",
+				lipgloss.NewStyle().Foreground(ErrorColor).Render("⚠"),
+				lipgloss.NewStyle().Foreground(FgMuted).Render(distro))
+			content += lipgloss.NewStyle().Foreground(FgMuted).Render("Press 'i' to automatically install Ollama, or install it manually and press 'e' to disable AI") + "\n"
+		} else if m.aiInstallingOllama {
+			content += fmt.Sprintf("\n%s Installing Ollama...\n",
+				m.spinner.View())
+			content += lipgloss.NewStyle().Foreground(FgMuted).Render("This may take a few minutes.") + "\n"
+		} else if m.aiInstallResult != "" {
+			if strings.Contains(m.aiInstallResult, "successfully") {
+				content += fmt.Sprintf("\n%s Ollama installed successfully!\n",
+					lipgloss.NewStyle().Foreground(SuccessColor).Render("✓"))
+				content += lipgloss.NewStyle().Foreground(FgMuted).Render(m.aiInstallResult) + "\n"
+			} else {
+				content += fmt.Sprintf("\n%s Installation failed: %s\n",
+					lipgloss.NewStyle().Foreground(ErrorColor).Render("✗"),
+					lipgloss.NewStyle().Foreground(FgMuted).Render(m.aiInstallResult))
+			}
+		} else {
+			// Ollama IS installed - show configuration options
+			content += fmt.Sprintf("\n%s Ollama detected on this system.\n",
+				lipgloss.NewStyle().Foreground(SuccessColor).Render("✓"))
+			content += "\n"
+
+			// Ollama URL text input
+			content += "Ollama URL:\n"
+			if len(m.inputs) > 0 {
+				content += m.inputs[0].View() + "\n\n"
+			} else {
+				// Fallback if inputs not initialized
+				content += fmt.Sprintf("  %s\n\n", m.aiOllamaURL)
+			}
+
+			// Model dropdown
+			content += "Model:\n"
+			if m.aiModelDropdownOpen {
+				// Show dropdown with all models
+				dropdownBorder := lipgloss.NewStyle().
+					Border(lipgloss.RoundedBorder()).
+					BorderForeground(Primary)
+
+				var dropdownItems string
+				for i, modelName := range m.aiModels {
+					prefix := "  "
+					if i == m.aiModelIndex {
+						prefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+						modelName = lipgloss.NewStyle().Foreground(Secondary).Bold(true).Render(modelName)
+					}
+					dropdownItems += prefix + modelName + "\n"
+				}
+
+				if len(m.aiModels) == 0 {
+					dropdownItems = lipgloss.NewStyle().Foreground(FgMuted).Render("  None") + "\n"
+				}
+
+				content += dropdownBorder.Render(dropdownItems)
+				content += "\n"
+			} else {
+				// Show current selection with dropdown indicator
+				currentModel := m.aiModel
+				if currentModel == "" {
+					if m.aiTesting {
+						currentModel = lipgloss.NewStyle().Foreground(FgMuted).Render("(Fetching models...)")
+					} else if len(m.aiModels) > 0 {
+						currentModel = lipgloss.NewStyle().Foreground(FgMuted).Render("(Press Enter to select model)")
+					} else {
+						currentModel = lipgloss.NewStyle().Foreground(FgMuted).Render("(None)")
+					}
+				}
+
+				dropdownIndicator := "▼"
+				if len(m.aiModels) > 0 {
+					dropdownIndicator = lipgloss.NewStyle().Foreground(Secondary).Render("▼")
+				} else {
+					dropdownIndicator = lipgloss.NewStyle().Foreground(FgMuted).Render("▼")
+				}
+
+				content += fmt.Sprintf("  %s %s\n\n", currentModel, dropdownIndicator)
+			}
+
+			// Test connection result
+			if m.aiTesting {
+				content += m.spinner.View() + " Fetching available models...\n"
+			} else if m.aiTestResult != "" {
+				if strings.Contains(m.aiTestResult, "Found") {
+					content += lipgloss.NewStyle().Foreground(SuccessColor).Render("✓ "+m.aiTestResult) + "\n"
+					if len(m.aiModels) > 0 {
+						content += lipgloss.NewStyle().Foreground(FgMuted).Render("Press Enter to select a model from dropdown") + "\n"
+					}
+				} else {
+					content += lipgloss.NewStyle().Foreground(ErrorColor).Render("✗ "+m.aiTestResult) + "\n"
+					content += lipgloss.NewStyle().Foreground(FgMuted).Render("Press 't' to retry connection") + "\n"
+				}
+			}
+
+			// Show usage guidance at the bottom when enabled and models are available
+			if len(m.aiModels) > 0 {
+				content += "\n"
+				content += lipgloss.NewStyle().Foreground(Secondary).Render("Getting Started:") + "\n"
+				content += lipgloss.NewStyle().Foreground(FgMuted).Render("Download model: ollama pull <model>") + "\n"
+				content += lipgloss.NewStyle().Foreground(FgMuted).Render("Recommended models: gemma3:4b & llama3.2:3b") + "\n"
+			}
+		}
+	}
+
+	return content
+}
+
 func (m model) renderPermissions() string {
 	var content string
 
@@ -1787,6 +2135,25 @@ func (m model) getHelpText() string {
 		return "↑/↓: Switch field  •  Enter: Continue  •  Esc: Back  •  Q: Quit"
 	case stepSonarr, stepRadarr:
 		return "Tab: Next field  •  T: Test connection  •  Enter: Continue  •  Esc: Back  •  Q: Quit"
+	case stepAI:
+		helpText := "E: Toggle AI"
+		if !m.aiOllamaInstalled && !m.aiInstallingOllama {
+			helpText += "  •  I: Install Ollama"
+		}
+		if m.aiEnabled && !m.aiModelDropdownOpen && !m.aiInstallingOllama {
+			helpText += "  •  T: Test connection"
+		}
+		if m.aiModelDropdownOpen {
+			helpText = "↑/↓: Navigate  •  Enter: Select  •  Esc: Close  •  Q: Quit"
+		} else if !m.aiInstallingOllama {
+			if m.aiEnabled && len(m.aiModels) > 0 {
+				helpText += "  •  Enter: Open model dropdown"
+			}
+			helpText += "  •  Enter: Continue  •  Q: Quit"
+		} else {
+			helpText += "  •  Q: Quit (installation in progress)"
+		}
+		return helpText
 	case stepPermissions:
 		return "↑/↓: Switch field  •  Enter: Continue  •  Esc: Back  •  Q: Quit"
 	case stepConfirm:
@@ -1835,6 +2202,123 @@ func discoverOllamaModels(endpoint string) ([]string, error) {
 	}
 
 	return models, nil
+}
+
+// testOllama tests connection to Ollama and fetches available models
+func testOllama(url string) tea.Cmd {
+	return func() tea.Msg {
+		models, err := discoverOllamaModels(url)
+		if err != nil {
+			return ollamaTestResultMsg{
+				success: false,
+				models:  nil,
+				err:     err,
+			}
+		}
+
+		return ollamaTestResultMsg{
+			success: true,
+			models:  models,
+			err:     nil,
+		}
+	}
+}
+
+// checkOllamaInstalled checks if Ollama command is available
+func checkOllamaInstalled() bool {
+	_, err := exec.LookPath("ollama")
+	return err == nil
+}
+
+// detectDistro detects the Linux distribution
+func detectDistro() string {
+	// Try reading /etc/os-release first
+	data, err := os.ReadFile("/etc/os-release")
+	if err == nil {
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "ID=") {
+				distroID := strings.TrimPrefix(line, "ID=")
+				distroID = strings.Trim(distroID, "\"")
+				return distroID
+			}
+		}
+	}
+
+	// Fallback: check for package managers
+	if _, err := exec.LookPath("pacman"); err == nil {
+		return "arch"
+	}
+	if _, err := exec.LookPath("apt-get"); err == nil {
+		return "debian"
+	}
+	if _, err := exec.LookPath("dnf"); err == nil {
+		return "fedora"
+	}
+	if _, err := exec.LookPath("zypper"); err == nil {
+		return "opensuse"
+	}
+
+	return "unknown"
+}
+
+// installOllama installs Ollama using the appropriate method for the distro
+func installOllama() tea.Cmd {
+	return func() tea.Msg {
+		distro := detectDistro()
+
+		var cmd *exec.Cmd
+
+		switch distro {
+		case "arch", "manjaro", "endeavouros":
+			// Arch-based: Check for yay or paru, otherwise use AUR helper script
+			if _, err := exec.LookPath("yay"); err == nil {
+				cmd = exec.Command("yay", "-S", "--noconfirm", "ollama-bin")
+			} else if _, err := exec.LookPath("paru"); err == nil {
+				cmd = exec.Command("paru", "-S", "--noconfirm", "ollama-bin")
+			} else {
+				// Fallback to official install script
+				cmd = exec.Command("sh", "-c", "curl -fsSL https://ollama.com/install.sh | sh")
+			}
+
+		case "debian", "ubuntu", "linuxmint", "pop":
+			// Debian-based: Use official install script
+			cmd = exec.Command("sh", "-c", "curl -fsSL https://ollama.com/install.sh | sh")
+
+		case "fedora", "rhel", "centos":
+			// RHEL-based: Use official install script
+			cmd = exec.Command("sh", "-c", "curl -fsSL https://ollama.com/install.sh | sh")
+
+		case "opensuse", "suse":
+			// openSUSE: Use official install script
+			cmd = exec.Command("sh", "-c", "curl -fsSL https://ollama.com/install.sh | sh")
+
+		default:
+			// Unknown distro: Try official install script as fallback
+			cmd = exec.Command("sh", "-c", "curl -fsSL https://ollama.com/install.sh | sh")
+		}
+
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return ollamaInstallResultMsg{
+				success: false,
+				err:     fmt.Errorf("installation failed: %w\nOutput: %s", err, string(output)),
+			}
+		}
+
+		// Verify installation
+		if !checkOllamaInstalled() {
+			return ollamaInstallResultMsg{
+				success: false,
+				err:     fmt.Errorf("installation completed but 'ollama' command not found"),
+			}
+		}
+
+		return ollamaInstallResultMsg{
+			success: true,
+			err:     nil,
+		}
+	}
 }
 
 func main() {

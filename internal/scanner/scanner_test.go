@@ -13,7 +13,7 @@ func TestNewFileScanner(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
-	scanner := NewFileScanner(db)
+	scanner := NewFileScanner(db, nil)
 
 	if scanner.db == nil {
 		t.Error("Expected db to be set")
@@ -60,7 +60,7 @@ func TestIsVideoFile(t *testing.T) {
 func TestIsExtraContent(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	scanner := NewFileScanner(db)
+	scanner := NewFileScanner(db, nil)
 
 	tests := []struct {
 		path     string
@@ -89,7 +89,7 @@ func TestIsExtraContent(t *testing.T) {
 func TestShouldIncludeFile(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	scanner := NewFileScanner(db)
+	scanner := NewFileScanner(db, nil)
 
 	tests := []struct {
 		name      string
@@ -155,7 +155,7 @@ func TestShouldIncludeFile(t *testing.T) {
 func TestProcessFile_Movie(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	scanner := NewFileScanner(db)
+	scanner := NewFileScanner(db, nil)
 
 	// Create a temporary test file
 	tempDir := t.TempDir()
@@ -212,7 +212,7 @@ func TestProcessFile_Movie(t *testing.T) {
 func TestProcessFile_Episode(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	scanner := NewFileScanner(db)
+	scanner := NewFileScanner(db, nil)
 
 	// Create a temporary test file
 	tempDir := t.TempDir()
@@ -277,7 +277,7 @@ func TestProcessFile_Episode(t *testing.T) {
 func TestProcessFile_NonCompliant(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	scanner := NewFileScanner(db)
+	scanner := NewFileScanner(db, nil)
 
 	// Create a non-compliant file (has release markers)
 	tempDir := t.TempDir()
@@ -322,7 +322,7 @@ func TestProcessFile_NonCompliant(t *testing.T) {
 func TestScanPath_Integration(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	scanner := NewFileScanner(db)
+	scanner := NewFileScanner(db, nil)
 
 	// Create test directory structure
 	tempDir := t.TempDir()
@@ -397,7 +397,7 @@ func TestScanPath_Integration(t *testing.T) {
 func TestScanLibraries(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	scanner := NewFileScanner(db)
+	scanner := NewFileScanner(db, nil)
 
 	// Create test directories
 	tempDir := t.TempDir()

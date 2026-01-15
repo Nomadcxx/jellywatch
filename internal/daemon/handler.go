@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Nomadcxx/jellywatch/internal/ai"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/notify"
@@ -104,6 +105,7 @@ type MediaHandlerConfig struct {
 	FileMode      os.FileMode
 	DirMode       os.FileMode
 	SonarrClient  *sonarr.Client
+	AIIntegrator  *ai.Integrator
 }
 
 func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
@@ -128,6 +130,9 @@ func NewMediaHandler(cfg MediaHandlerConfig) *MediaHandler {
 	}
 	if cfg.TargetUID >= 0 || cfg.TargetGID >= 0 || cfg.FileMode != 0 || cfg.DirMode != 0 {
 		orgOpts = append(orgOpts, organizer.WithPermissions(cfg.TargetUID, cfg.TargetGID, cfg.FileMode, cfg.DirMode))
+	}
+	if cfg.AIIntegrator != nil {
+		orgOpts = append(orgOpts, organizer.WithAIIntegrator(cfg.AIIntegrator))
 	}
 	org := organizer.NewOrganizer(allLibs, orgOpts...)
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Nomadcxx/jellywatch/internal/ai"
 	"github.com/Nomadcxx/jellywatch/internal/analyzer"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/library"
@@ -45,6 +46,7 @@ type Organizer struct {
 	dirMode        os.FileMode
 	sonarrClient   *sonarr.Client
 	db             *database.MediaDB // HOLDEN: Database for self-learning
+	aiIntegrator   *ai.Integrator    // AI title enhancement
 }
 
 func NewOrganizer(libraries []string, options ...func(*Organizer)) *Organizer {
@@ -148,6 +150,13 @@ func WithDatabase(db *database.MediaDB) func(*Organizer) {
 	}
 }
 
+// WithAIIntegrator sets the AI integrator for title enhancement
+func WithAIIntegrator(aiIntegrator *ai.Integrator) func(*Organizer) {
+	return func(o *Organizer) {
+		o.aiIntegrator = aiIntegrator
+	}
+}
+
 func (o *Organizer) buildTransferOptions() transfer.TransferOptions {
 	return transfer.TransferOptions{
 		Timeout:       o.timeout,
@@ -200,7 +209,16 @@ func (o *Organizer) OrganizeMovie(sourcePath, libraryPath string) (*Organization
 		}, nil
 	}
 
-	cleanName := naming.NormalizeMovieName(movie.Title, movie.Year)
+	// AI Enhancement: Use AI to improve title if confidence is low
+	title := movie.Title
+	if o.aiIntegrator != nil && o.aiIntegrator.IsEnabled() {
+		enhancedTitle, source, err := o.aiIntegrator.EnhanceTitle(movie.Title, filename, "movie")
+		if err == nil && source != ai.SourceRegex {
+			title = enhancedTitle
+		}
+	}
+
+	cleanName := naming.NormalizeMovieName(title, movie.Year)
 	movieDir := filepath.Join(libraryPath, cleanName)
 	ext := filepath.Ext(sourcePath)
 	targetPath := filepath.Join(movieDir, cleanName+ext)
@@ -320,15 +338,24 @@ func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*Organiza
 		}, nil
 	}
 
-	showDir := findExistingShowDir(libraryPath, tv.Title)
+	// AI Enhancement: Use AI to improve title if confidence is low
+	title := tv.Title
+	if o.aiIntegrator != nil && o.aiIntegrator.IsEnabled() {
+		enhancedTitle, source, err := o.aiIntegrator.EnhanceTitle(tv.Title, filename, "tv")
+		if err == nil && source != ai.SourceRegex {
+			title = enhancedTitle
+		}
+	}
+
+	showDir := findExistingShowDir(libraryPath, title)
 	if showDir == "" {
-		showName := naming.NormalizeTVShowName(tv.Title, tv.Year)
+		showName := naming.NormalizeTVShowName(title, tv.Year)
 		showDir = filepath.Join(libraryPath, showName)
 	}
 
 	seasonDir := filepath.Join(showDir, naming.FormatSeasonFolder(tv.Season))
 	ext := filepath.Ext(sourcePath)
-	episodeName := naming.FormatTVEpisodeFilename(tv.Title, tv.Year, tv.Season, tv.Episode, ext[1:])
+	episodeName := naming.FormatTVEpisodeFilename(title, tv.Year, tv.Season, tv.Episode, ext[1:])
 	targetPath := filepath.Join(seasonDir, episodeName)
 
 	existingFile, existingQuality := o.findExistingMediaFile(seasonDir)

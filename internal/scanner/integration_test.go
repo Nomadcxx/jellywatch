@@ -82,7 +82,7 @@ func TestScanner_PopulatesDatabase(t *testing.T) {
 		os.Remove(dbPath)
 	}()
 
-	scanner := NewFileScanner(db)
+	scanner := NewFileScanner(db, nil)
 	result, err := scanner.ScanLibraries(context.Background(), []string{libraryDir}, []string{libraryDir})
 	require.NoError(t, err)
 

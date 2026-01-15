@@ -8,7 +8,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Nomadcxx/jellywatch/internal/ai"
 	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/daemon"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/notify"
@@ -138,6 +140,48 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		logger.Info("daemon", "Radarr integration enabled", logging.F("url", cfg.Radarr.URL))
 	}
 
+	// Initialize AI integrator for title enhancement
+	var aiIntegrator *ai.Integrator
+	if cfg.AI.Enabled {
+		aiConfig := ai.Config{
+			Enabled:             cfg.AI.Enabled,
+			OllamaEndpoint:      cfg.AI.OllamaEndpoint,
+			Model:               cfg.AI.Model,
+			ConfidenceThreshold: cfg.AI.ConfidenceThreshold,
+			Timeout:             time.Duration(cfg.AI.TimeoutSeconds) * time.Second,
+			CacheEnabled:        cfg.AI.CacheEnabled,
+		}
+		if aiConfig.Timeout == 0 {
+			aiConfig.Timeout = 5 * time.Second
+		}
+
+		// Open database for AI cache
+		dbPath := config.GetDatabasePath()
+		db, err := database.OpenPath(dbPath)
+		if err != nil {
+			logger.Warn("daemon", "Failed to open database for AI cache, AI disabled",
+				logging.F("error", err.Error()))
+			aiConfig.Enabled = false
+		} else {
+			defer db.Close()
+			aiIntegrator, err = ai.NewIntegrator(aiConfig, db)
+			if err != nil {
+				logger.Warn("daemon", "Failed to initialize AI integrator, AI disabled",
+					logging.F("error", err.Error()))
+				aiIntegrator, _ = ai.NewIntegrator(ai.Config{}, nil)
+			} else {
+				logger.Info("daemon", "AI integration enabled",
+					logging.F("model", cfg.AI.Model),
+					logging.F("confidence_threshold", cfg.AI.ConfidenceThreshold))
+			}
+		}
+	} else {
+		aiIntegrator, _ = ai.NewIntegrator(ai.Config{}, nil)
+	}
+	if aiIntegrator != nil {
+		defer aiIntegrator.Close()
+	}
+
 	handler := daemon.NewMediaHandler(daemon.MediaHandlerConfig{
 		TVLibraries:   cfg.Libraries.TV,
 		MovieLibs:     cfg.Libraries.Movies,
@@ -152,6 +196,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		FileMode:      fileMode,
 		DirMode:       dirMode,
 		SonarrClient:  sonarrClient,
+		AIIntegrator:  aiIntegrator,
 	})
 
 	healthServer := daemon.NewServer(handler, healthAddr, logger)

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Nomadcxx/jellywatch/internal/ai"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/quality"
@@ -16,6 +17,7 @@ import (
 // FileScanner scans libraries and populates the media_files database
 type FileScanner struct {
 	db             *database.MediaDB
+	aiIntegrator   *ai.Integrator
 	minMovieSize   int64
 	minEpisodeSize int64
 	skipPatterns   []string
@@ -54,9 +56,10 @@ type ScanOptions struct {
 const progressReportInterval = 10
 
 // NewFileScanner creates a new file scanner with default settings
-func NewFileScanner(db *database.MediaDB) *FileScanner {
+func NewFileScanner(db *database.MediaDB, aiIntegrator *ai.Integrator) *FileScanner {
 	return &FileScanner{
 		db:             db,
+		aiIntegrator:   aiIntegrator,
 		minMovieSize:   quality.MinMovieSize,   // 500MB
 		minEpisodeSize: quality.MinEpisodeSize, // 50MB
 		skipPatterns: []string{
@@ -274,7 +277,16 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 			return fmt.Errorf("parse TV show: %w", err)
 		}
 
-		normalizedTitle = database.NormalizeTitle(tv.Title)
+		// AI Enhancement: Use AI to improve title if confidence is low
+		title := tv.Title
+		if s.aiIntegrator != nil && s.aiIntegrator.IsEnabled() {
+			enhancedTitle, source, err := s.aiIntegrator.EnhanceTitle(tv.Title, filename, "tv")
+			if err == nil && source != ai.SourceRegex {
+				title = enhancedTitle
+			}
+		}
+
+		normalizedTitle = database.NormalizeTitle(title)
 		if tv.Year != "" {
 			if yearInt, err := parseInt(tv.Year); err == nil {
 				year = &yearInt
@@ -288,7 +300,16 @@ func (s *FileScanner) processFile(filePath string, info os.FileInfo, libraryRoot
 			return fmt.Errorf("parse movie: %w", err)
 		}
 
-		normalizedTitle = database.NormalizeTitle(movie.Title)
+		// AI Enhancement: Use AI to improve title if confidence is low
+		title := movie.Title
+		if s.aiIntegrator != nil && s.aiIntegrator.IsEnabled() {
+			enhancedTitle, source, err := s.aiIntegrator.EnhanceTitle(movie.Title, filename, "movie")
+			if err == nil && source != ai.SourceRegex {
+				title = enhancedTitle
+			}
+		}
+
+		normalizedTitle = database.NormalizeTitle(title)
 		if movie.Year != "" {
 			if yearInt, err := parseInt(movie.Year); err == nil {
 				year = &yearInt
