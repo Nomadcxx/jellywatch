@@ -66,6 +66,78 @@ func TestExtractYear(t *testing.T) {
 	}
 }
 
+// TestExtractYear_MultipleYears tests that we extract the FIRST year when multiple
+// parenthesized years exist. This is important for folder names like:
+// "The Last Frontier (2015) (2025)" where 2015 is the premiere year and 2025 is a release marker.
+// Bug report: JELLYWATCH_BUG_REPORT_OverAggressive_Year_Stripping_TV_Show_Names.md
+func TestExtractYear_MultipleYears(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected int
+	}{
+		{
+			name:     "Two years - should take first (premiere year)",
+			input:    "The Last Frontier (2015) (2025)",
+			expected: 2015, // NOT 2025
+		},
+		{
+			name:     "Duplicate years",
+			input:    "The Last Frontier (2025) (2025)",
+			expected: 2025,
+		},
+		{
+			name:     "Single year still works",
+			input:    "For All Mankind (2019)",
+			expected: 2019,
+		},
+		{
+			name:     "Three years - take first",
+			input:    "Show Name (2010) (2015) (2025)",
+			expected: 2010,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ExtractYear(tt.input)
+			if result != tt.expected {
+				t.Errorf("ExtractYear(%q) = %d, want %d", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestStripYear_MultipleYears tests that StripYear only removes the extracted year,
+// preserving other years in the title if needed.
+func TestStripYear_MultipleYears(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Two years - strip first year only",
+			input:    "The Last Frontier (2015) (2025)",
+			expected: "The Last Frontier (2025)", // Strip 2015, keep 2025 as part of title
+		},
+		{
+			name:     "Single year - normal behavior",
+			input:    "For All Mankind (2019)",
+			expected: "For All Mankind",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := StripYear(tt.input)
+			if result != tt.expected {
+				t.Errorf("StripYear(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestDatabaseOpenClose(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
