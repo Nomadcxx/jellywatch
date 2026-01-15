@@ -4,6 +4,83 @@ import (
 	"testing"
 )
 
+// TestIsTVEpisodeFilename_DateBased tests detection of date-based episodes
+// like The Daily Show, Conan, Late Night shows that use YYYY.MM.DD format
+// instead of standard S##E## format.
+// Bug report: JELLYWATCH_BUG_REPORT_DailyShow_Misclassification.md
+func TestIsTVEpisodeFilename_DateBased(t *testing.T) {
+	tests := []struct {
+		name     string
+		filename string
+		wantTV   bool
+	}{
+		// Date-based episodes (SHOULD be detected as TV)
+		{
+			name:     "Daily Show with dot separators",
+			filename: "The.Daily.Show.2026.01.13.Joachim.Trier.1080p.WEB.h264-EDITH.mkv",
+			wantTV:   true,
+		},
+		{
+			name:     "Daily Show different guest",
+			filename: "The.Daily.Show.2026.01.14.Stephen.J.Dubner.1080p.WEB.h264-EDITH.mkv",
+			wantTV:   true,
+		},
+		{
+			name:     "Conan with dash separators",
+			filename: "Conan.2024-03-15.Guest.Name.720p.HDTV.mkv",
+			wantTV:   true,
+		},
+		{
+			name:     "Late Show date format",
+			filename: "The.Late.Show.2024.01.15.1080p.WEB.mkv",
+			wantTV:   true,
+		},
+		{
+			name:     "Tonight Show date format",
+			filename: "The.Tonight.Show.Starring.Jimmy.Fallon.2024.02.28.1080p.WEB.mkv",
+			wantTV:   true,
+		},
+
+		// Standard S##E## episodes (should still work)
+		{
+			name:     "Standard SxxExx format",
+			filename: "Show.S01E01.1080p.mkv",
+			wantTV:   true,
+		},
+		{
+			name:     "Standard XxXX format",
+			filename: "Show.1x01.1080p.mkv",
+			wantTV:   true,
+		},
+
+		// Movies (should NOT be detected as TV)
+		{
+			name:     "Movie with year",
+			filename: "Movie.2024.1080p.BluRay.mkv",
+			wantTV:   false,
+		},
+		{
+			name:     "Movie with year in title",
+			filename: "The.Matrix.1999.mkv",
+			wantTV:   false,
+		},
+		{
+			name:     "Movie with full date in middle - no episode context",
+			filename: "2012.2009.1080p.BluRay.mkv",
+			wantTV:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsTVEpisodeFilename(tt.filename)
+			if got != tt.wantTV {
+				t.Errorf("IsTVEpisodeFilename(%q) = %v, want %v", tt.filename, got, tt.wantTV)
+			}
+		})
+	}
+}
+
 func TestParseMovieName(t *testing.T) {
 	tests := []struct {
 		name      string

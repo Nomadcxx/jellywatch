@@ -25,7 +25,11 @@ var (
 	yearParenRegex  = regexp.MustCompile(`\((\d{4})\)`)
 	episodeSERegex  = regexp.MustCompile(`[Ss](\d{1,2})[Ee](\d{1,2})`)
 	episodeXRegex   = regexp.MustCompile(`(\d{1,2})x(\d{1,2})`)
-	releasePatterns []*regexp.Regexp
+	// Date-based episode pattern for daily shows (The Daily Show, Conan, Late Night, etc.)
+	// Matches YYYY.MM.DD or YYYY-MM-DD format commonly used by daily/talk shows
+	// Bug fix: JELLYWATCH_BUG_REPORT_DailyShow_Misclassification.md
+	episodeDateRegex = regexp.MustCompile(`\b(20\d{2})[\.\-](\d{2})[\.\-](\d{2})\b`)
+	releasePatterns  []*regexp.Regexp
 )
 
 func init() {
@@ -60,7 +64,15 @@ func init() {
 
 func IsMovieFilename(filename string) bool {
 	baseName := strings.TrimSuffix(filepath.Base(filename), filepath.Ext(filename))
-	return !episodeSERegex.MatchString(baseName) && !episodeXRegex.MatchString(baseName)
+	// Check standard episode patterns (S01E01, 1x01)
+	if episodeSERegex.MatchString(baseName) || episodeXRegex.MatchString(baseName) {
+		return false // It's a TV episode
+	}
+	// Check date-based episode pattern (2024.01.15) for daily/talk shows
+	if episodeDateRegex.MatchString(baseName) {
+		return false // It's a TV episode (date-based)
+	}
+	return true // No episode patterns found - treat as movie
 }
 
 func IsTVEpisodeFilename(filename string) bool {
