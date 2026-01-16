@@ -77,6 +77,7 @@ type Sample struct {
 type Sampler struct {
 	mu        sync.RWMutex
 	samples   map[Category][]*Sample
+	seen      map[Category]map[string]bool // O(1) duplicate check
 	maxPerCat int
 	rand      *rand.Rand
 }
@@ -84,7 +85,8 @@ type Sampler struct {
 // NewSampler creates a new sampler with the given configuration
 func NewSampler(maxPerCat int, seed int64) *Sampler {
 	return &Sampler{
-		samples:   make(map[Category][]*Sample),
+		samples: make(map[Category][]*Sample),
+		seen:    make(map[Category]map[string]bool),
 		maxPerCat: maxPerCat,
 		rand:      rand.New(rand.NewSource(seed)),
 	}
@@ -106,17 +108,15 @@ func (s *Sampler) ClassifyAndSample(info *ReleaseInfo) {
 	defer s.mu.Unlock()
 
 	for _, cat := range categories {
-		existing := s.samples[cat]
-		// Check if we already have this release (by hash)
-		alreadySampled := false
-		for _, s := range existing {
-			if s.Info.Hash == info.Hash {
-				alreadySampled = true
-				break
-			}
+		// Initialize seen map for this category if needed
+		if s.seen[cat] == nil {
+			s.seen[cat] = make(map[string]bool)
 		}
-		if !alreadySampled {
-			s.samples[cat] = append(existing, sample)
+
+		// O(1) duplicate check
+		if !s.seen[cat][info.Hash] {
+			s.seen[cat][info.Hash] = true
+			s.samples[cat] = append(s.samples[cat], sample)
 		}
 	}
 }
