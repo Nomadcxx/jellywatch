@@ -61,6 +61,34 @@ func OpenPath(path string) (*MediaDB, error) {
 	return mdb, nil
 }
 
+// OpenInMemory opens an in-memory database for testing
+func OpenInMemory() (*MediaDB, error) {
+	// Open in-memory database with shared cache enabled
+	db, err := sql.Open("sqlite", ":memory:?_cache=shared")
+	if err != nil {
+		return nil, fmt.Errorf("failed to open in-memory database: %w", err)
+	}
+
+	// Test connection
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to ping in-memory database: %w", err)
+	}
+
+	mdb := &MediaDB{
+		db:   db,
+		path: ":memory:",
+	}
+
+	// Apply migrations
+	if err := mdb.migrate(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to migrate in-memory database: %w", err)
+	}
+
+	return mdb, nil
+}
+
 // Close closes the database connection
 func (m *MediaDB) Close() error {
 	return m.db.Close()

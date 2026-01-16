@@ -126,7 +126,28 @@ type AIConfig struct {
 	CacheEnabled        bool    `mapstructure:"cache_enabled"`
 	CloudModel          string  `mapstructure:"cloud_model"`
 	// New fields for compliance/consolidation
-	AutoResolveRisky    bool    `mapstructure:"auto_resolve_risky"`
+	AutoResolveRisky bool `mapstructure:"auto_resolve_risky"`
+}
+
+// Validate checks if the AI configuration is valid
+func (c *AIConfig) Validate() error {
+	if c.Enabled && c.Model == "" {
+		return fmt.Errorf("AI enabled but no model specified")
+	}
+
+	if c.Enabled && c.OllamaEndpoint == "" {
+		return fmt.Errorf("AI enabled but no Ollama endpoint specified")
+	}
+
+	if c.ConfidenceThreshold < 0 || c.ConfidenceThreshold > 1 {
+		return fmt.Errorf("confidence threshold must be between 0 and 1")
+	}
+
+	if c.TimeoutSeconds < 1 {
+		return fmt.Errorf("timeout must be at least 1 second")
+	}
+
+	return nil
 }
 
 // WatchConfig contains directories to watch
