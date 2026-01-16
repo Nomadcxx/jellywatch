@@ -7,7 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Nomadcxx/jellywatch/internal/ai"
+	"github.com/Nomadcxx/jellywatch/internal/app"
 	"github.com/Nomadcxx/jellywatch/internal/config"
+	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/daemon"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/organizer"
@@ -34,6 +37,8 @@ var (
 	radarrURL      string
 	radarrAPIKey   string
 	backendName    string
+	useAI          bool
+	noAI           bool
 )
 
 func main() {
@@ -53,6 +58,8 @@ Features:
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.config/jellywatch/config.toml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().BoolVarP(&dryRun, "dry-run", "n", false, "preview changes without moving files")
+	rootCmd.PersistentFlags().BoolVar(&useAI, "ai", false, "enable AI title enhancement (requires Ollama)")
+	rootCmd.PersistentFlags().BoolVar(&noAI, "no-ai", false, "disable AI title enhancement (overrides config)")
 
 	rootCmd.AddCommand(newOrganizeCmd())
 	rootCmd.AddCommand(newOrganizeFolderCmd())
@@ -125,21 +132,78 @@ func runOrganize(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot access source: %w", err)
 	}
 
-	org := organizer.NewOrganizer(
-		[]string{target},
+	org, err := createOrganizer(target)
+	if err != nil {
+		return err
+	}
+	defer org.Close()
+
+	if info.IsDir() {
+		return organizeDirectory(org.Organizer, source, target)
+	}
+	_, err = organizeFile(org.Organizer, source, target)
+	return err
+}
+
+// closeableOrganizer wraps an organizer with resources that need cleanup
+type closeableOrganizer struct {
+	*organizer.Organizer
+	db            *database.MediaDB
+	aiIntegrator  *ai.Integrator
+}
+
+// Close releases resources held by the organizer
+func (c *closeableOrganizer) Close() {
+	if c.aiIntegrator != nil {
+		c.aiIntegrator.Close()
+	}
+	if c.db != nil {
+		c.db.Close()
+	}
+}
+
+// createOrganizer creates an organizer with optional AI integration.
+// Returns a closeableOrganizer that must be Closed by the caller.
+func createOrganizer(target string) (*closeableOrganizer, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		cfg = &config.Config{} // Use defaults if config not found
+	}
+
+	opts := []func(*organizer.Organizer){
 		organizer.WithDryRun(dryRun),
 		organizer.WithKeepSource(keepSource),
 		organizer.WithForceOverwrite(forceOverwrite),
 		organizer.WithTimeout(timeout),
 		organizer.WithChecksumVerify(verifyChecksum),
 		organizer.WithBackend(transfer.ParseBackend(backendName)),
-	)
-
-	if info.IsDir() {
-		return organizeDirectory(org, source, target)
 	}
-	_, err = organizeFile(org, source, target)
-	return err
+
+	var db *database.MediaDB
+	var aiIntegrator *ai.Integrator
+
+	// Add AI integrator if enabled
+	if useAI || (cfg.AI.Enabled && !noAI) {
+		db, err = database.OpenPath(config.GetDatabasePath())
+		if err != nil {
+			return nil, fmt.Errorf("failed to open database: %w", err)
+		}
+
+		aiIntegrator, err = app.InitAI(cfg, db)
+		if err != nil {
+			db.Close()
+			return nil, fmt.Errorf("failed to initialize AI: %w", err)
+		}
+		if aiIntegrator != nil {
+			opts = append(opts, organizer.WithAIIntegrator(aiIntegrator))
+		}
+	}
+
+	return &closeableOrganizer{
+		Organizer:     organizer.NewOrganizer([]string{target}, opts...),
+		db:           db,
+		aiIntegrator: aiIntegrator,
+	}, nil
 }
 
 func organizeFile(org *organizer.Organizer, source, target string) (*organizer.OrganizationResult, error) {
@@ -241,15 +305,11 @@ Examples:
 				}
 			}
 
-			org := organizer.NewOrganizer(
-				[]string{target},
-				organizer.WithDryRun(dryRun),
-				organizer.WithKeepSource(keepSource),
-				organizer.WithForceOverwrite(forceOverwrite),
-				organizer.WithTimeout(timeout),
-				organizer.WithChecksumVerify(verifyChecksum),
-				organizer.WithBackend(transfer.ParseBackend(backendName)),
-			)
+			org, err := createOrganizer(target)
+			if err != nil {
+				return err
+			}
+			defer org.Close()
 
 			result, err := org.OrganizeFolder(source, target, keepExtras)
 			if err != nil {
