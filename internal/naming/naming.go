@@ -204,13 +204,21 @@ func FormatTVEpisodeFilename(title, year string, season, episode int, ext string
 }
 
 func stripReleaseMarkers(s string) string {
-	s = strings.ReplaceAll(s, ".", " ")
-	s = strings.ReplaceAll(s, "_", " ")
-	s = strings.ReplaceAll(s, "-", " ")
-
+	// First apply the basic pattern replacements (existing patterns)
 	for _, re := range releasePatterns {
 		s = re.ReplaceAllString(s, " ")
 	}
+
+	// Then apply fuzzy pattern stripping (streaming platforms, audio, editions, hyphens)
+	s = StripStreamingPlatforms(s)
+	s = StripExtendedAudio(s)
+	s = StripEditionMarkers(s)
+	s = StripHyphenSuffixes(s)
+
+	// Finally normalize separators
+	s = strings.ReplaceAll(s, ".", " ")
+	s = strings.ReplaceAll(s, "_", " ")
+	s = strings.ReplaceAll(s, "-", " ")
 
 	return s
 }
