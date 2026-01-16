@@ -15,7 +15,8 @@ import (
 // Returns nil if AI is disabled or config is invalid.
 // This is a shared helper used by both CLI and daemon.
 func InitAI(cfg *config.Config, db *database.MediaDB) (*ai.Integrator, error) {
-	// Check if AI is enabled in config
+	// Note: cfg.AI is a value type (not pointer), so cfg.AI.Enabled won't panic on nil
+	// If AIConfig becomes a pointer in the future, add explicit nil check
 	if !cfg.AI.Enabled {
 		return nil, nil // AI disabled, not an error
 	}
