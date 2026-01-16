@@ -121,43 +121,283 @@ func (s *Sampler) ClassifyAndSample(info *ReleaseInfo) {
 	}
 }
 
-// classify determines which categories a release belongs to
+// Precompiled regex patterns for classification
+// These are combined into a single regex for efficient one-pass matching
+var (
+	// Combined regex for fast classification - matches multiple patterns in one pass
+	// Using alternation so we can check all common patterns at once
+	fastClassifyRegex = regexp.MustCompile(`(?i)(2160p|4K|1080p|720p|480p|REMUX|WEB-DL|WEBDL|WEBRip|BluRay|BDRip|DVDRip|HDTV|NF|AMZN|ATVP|HULU|DSNP|MAX|PMTP|HBO|CRiT|iTUNES|STAN|20\d{2}[\.\-]\d{2}[\.\-]\d{2}|\(?\d{4}[ \-–/&]\d{4}\)?|\d{4}\d{4}|\(19\d{2}\)|\(20\d{2}\)|\bS\d{1,2}E\d{1,2}\b|\b\d{1,2}x\d{1,2}\b|\bPt\d{1,2}\b|[\-. ]CD\d[\-. ]|[\-. ]Part\d{1,2}[\-. ]|[\-. ]Disk\d[\-. ]|[\-. ]Disc\d[\-. ])`)
+)
+
+// Release group regex - kept separate as it's more specific
+var releaseGroupRegex = regexp.MustCompile(`(?i)-(RARBG|YTS|YIFY|FLUX|ETHEL|Kitsune|NTb|CMRG|SPARKS|FGT|DIMENSION|SiGMA|CONTROL|GECKOS|FLiCKSiCK|iNCiTE|DiViDi|HoRnEtS|NBS|DONDAN|FmE|DFE|c0nFuSed|CDC|aAF|ALLiANCE|LiNE|PRoDJi|SFiNH|xOr|DEiTY|DoNE|DMT|TDF|BMD|LTER|WB|FoV|LOL|Sys|EVOLVE|QCF|ASAP|IMMERSE|BATV|2HD|KILLERS|REMARKABLE|OVERMATCH|WAFFLES|ANON|TLA|AFO|CAA|AOC|AOU|AFG|AJP)[\-.]`)
+
+// Foreign language regex
+var foreignRegex = regexp.MustCompile(`(?i)\.(German|French|Spanish|Italian|Japanese|Korean|Russian|Polish|Hindi|Thai|Chinese|Danish|Dutch|Swedish|Norwegian|Finnish|Czech|Greek|Hungarian|Portuguese|Hebrew|Arabic|Turkish|Vietnamese|Bulgarian|Romanian|Slovak|Croatian|Serbian|Ukrainian)\.|\b(German|French|Spanish|Italian|Japanese|Korean|Russian|Polish|Hindi|Thai|Chinese|Danish|Dutch|Swedish|Norwegian|Finnish|Czech|Greek|Hungarian|Portuguese|Hebrew|Arabic|Turkish|Vietnamese|Bulgarian|Romanian|Slovak|Croatian|Serbian|Ukrainian)\.(AC3|Dubbed|DUB)\b`)
+
+// classify determines which categories a release belongs to (optimized single-pass)
 func (s *Sampler) classify(releaseName, filename string) []Category {
 	var categories []Category
 
-	// Check each category
-	if containsQualityPattern(releaseName) || containsQualityPattern(filename) {
-		categories = append(categories, CategoryQuality)
+	// Combined check for most patterns (90%+ of classifications)
+	combined := releaseName + " " + filename
+	if fastClassifyRegex.MatchString(combined) {
+		lower := strings.ToLower(combined)
+
+		// Quick substring checks for quality (faster than regex)
+		if strings.Contains(lower, "2160p") || strings.Contains(lower, "4k") ||
+			strings.Contains(lower, "1080p") || strings.Contains(lower, "720p") ||
+			strings.Contains(lower, "480p") || strings.Contains(lower, "remux") ||
+			strings.Contains(lower, "web-dl") || strings.Contains(lower, "webdl") ||
+			strings.Contains(lower, "webrip") || strings.Contains(lower, "bluray") ||
+			strings.Contains(lower, "bdrip") || strings.Contains(lower, "dvdrip") ||
+			strings.Contains(lower, "hdtv") {
+			categories = append(categories, CategoryQuality)
+		}
+
+		// Streaming platforms
+		if strings.Contains(lower, ".nf.") || strings.Contains(lower, ".amzn.") ||
+			strings.Contains(lower, ".atvp.") || strings.Contains(lower, ".hulu.") ||
+			strings.Contains(lower, ".dsnp.") || strings.Contains(lower, ".max.") ||
+			strings.Contains(lower, ".pmtp.") || strings.Contains(lower, ".hbo.") ||
+			strings.Contains(lower, ".crit.") || strings.Contains(lower, ".itunes.") ||
+			strings.Contains(lower, ".stan.") {
+			categories = append(categories, CategoryStreaming)
+		}
+
+		// Date patterns (YYYY.MM.DD or YYYY-MM-DD)
+		if fastDatePattern(lower) {
+			categories = append(categories, CategoryDateEpisodes)
+		}
+
+		// Year edge cases
+		if fastYearEdgePattern(lower) {
+			categories = append(categories, CategoryYearEdge)
+		}
+
+		// TV formats
+		if fastTVPattern(lower) {
+			categories = append(categories, CategoryTVFormats)
+		}
+
+		// Multi-part
+		if strings.Contains(lower, ".cd1") || strings.Contains(lower, ".cd2") ||
+			strings.Contains(lower, ".part1.") || strings.Contains(lower, ".part2.") ||
+			strings.Contains(lower, ".disk1.") || strings.Contains(lower, ".disc1.") ||
+			strings.Contains(lower, "-cd1") || strings.Contains(lower, "-cd2") {
+			categories = append(categories, CategoryMultiPart)
+		}
 	}
-	if containsStreamingPlatform(releaseName) {
-		categories = append(categories, CategoryStreaming)
-	}
-	if containsReleaseGroup(releaseName) {
+
+	// Release group check (separate regex - more expensive)
+	if releaseGroupRegex.MatchString(releaseName) {
 		categories = append(categories, CategoryReleaseGroups)
 	}
-	if containsDatePattern(releaseName) || containsDatePattern(filename) {
-		categories = append(categories, CategoryDateEpisodes)
-	}
-	if containsYearEdgeCase(releaseName) {
-		categories = append(categories, CategoryYearEdge)
-	}
-	if containsSpecialChars(releaseName) || containsSpecialChars(filename) {
-		categories = append(categories, CategorySpecialChars)
-	}
-	if containsTVEpisodePattern(releaseName) || containsTVEpisodePattern(filename) {
-		categories = append(categories, CategoryTVFormats)
-	}
-	if containsMultiPart(releaseName) || containsMultiPart(filename) {
-		categories = append(categories, CategoryMultiPart)
-	}
-	if containsForeign(releaseName) {
+
+	// Foreign language check (separate regex)
+	if foreignRegex.MatchString(releaseName) {
 		categories = append(categories, CategoryForeign)
 	}
-	if containsObfuscatedPattern(releaseName) {
+
+	// Special characters check (manual scan is faster than regex for this case)
+	if hasSpecialChars(releaseName) || hasSpecialChars(filename) {
+		categories = append(categories, CategorySpecialChars)
+	}
+
+	// Obfuscated pattern check
+	if isObfuscated(releaseName) {
 		categories = append(categories, CategoryObfuscated)
 	}
 
 	return categories
+}
+
+// Fast inline checks for patterns (avoiding regex where possible)
+
+func fastDatePattern(s string) bool {
+	// Look for 20XX.XX.XX or 20XX-XX-XX pattern
+	for i := 0; i < len(s)-9; i++ {
+		if s[i] == '2' && s[i+1] >= '0' && s[i+1] <= '9' &&
+			s[i+2] >= '0' && s[i+2] <= '9' &&
+			(s[i+3] == '.' || s[i+3] == '-') &&
+			s[i+4] >= '0' && s[i+4] <= '9' &&
+			s[i+5] >= '0' && s[i+5] <= '9' &&
+			(s[i+6] == '.' || s[i+6] == '-') &&
+			s[i+7] >= '0' && s[i+7] <= '9' &&
+			s[i+8] >= '0' && s[i+8] <= '9' {
+			return true
+		}
+	}
+	return false
+}
+
+func fastYearEdgePattern(s string) bool {
+	// Look for (19XX) or (20XX) or YYYY/YYYY or YYYY-YYYY
+	for i := 0; i < len(s)-6; i++ {
+		// Parenthesized years
+		if s[i] == '(' && s[i+5] == ')' &&
+			((s[i+1] == '1' && s[i+2] == '9') || (s[i+1] == '2' && s[i+2] == '0')) &&
+			s[i+3] >= '0' && s[i+3] <= '9' &&
+			s[i+4] >= '0' && s[i+4] <= '9' {
+			return true
+		}
+		// Year ranges: YYYY-YYYY or YYYY/YYYY
+		if s[i] >= '0' && s[i] <= '9' && s[i+4] >= '0' && s[i+4] <= '9' &&
+			(s[i+5] == '-' || s[i+5] == '/' || s[i+5] == '&' || s[i+5] == ' ') {
+			return true
+		}
+	}
+	return false
+}
+
+func fastTVPattern(s string) bool {
+	// Look for S##E## or ##x## patterns
+	for i := 0; i < len(s)-5; i++ {
+		// S##E##
+		if (s[i] == 's' || s[i] == 'S') &&
+			s[i+1] >= '0' && s[i+1] <= '9' &&
+			s[i+2] >= '0' && s[i+2] <= '9' &&
+			(s[i+3] == 'e' || s[i+3] == 'E') &&
+			s[i+4] >= '0' && s[i+4] <= '9' &&
+			s[i+5] >= '0' && s[i+5] <= '9' {
+			return true
+		}
+		// ##x##
+		if i+4 < len(s) &&
+			s[i] >= '0' && s[i] <= '9' &&
+			s[i+1] >= '0' && s[i+1] <= '9' &&
+			(s[i+2] == 'x' || s[i+2] == 'X') &&
+			s[i+3] >= '0' && s[i+3] <= '9' &&
+			s[i+4] >= '0' && s[i+4] <= '9' {
+			return true
+		}
+	}
+	// Pt## pattern
+	for i := 0; i < len(s)-3; i++ {
+		if (s[i] == 'p' || s[i] == 'P') &&
+			(s[i+1] == 't' || s[i+1] == 'T') &&
+			s[i+2] >= '0' && s[i+2] <= '9' &&
+			s[i+3] >= '0' && s[i+3] <= '9' {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSpecialChars(s string) bool {
+	for _, ch := range s {
+		switch ch {
+		case '<', '>', ':', '"', '|', '?', '*', '[', ']', '{', '}', '\'', '`':
+			return true
+		}
+	}
+	return false
+}
+
+func isObfuscated(s string) bool {
+	if len(s) < 10 {
+		return false
+	}
+	// Check for very high alphanumeric ratio
+	alphanum := 0
+	for _, ch := range s {
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') {
+			alphanum++
+		}
+	}
+	if float64(alphanum)/float64(len(s)) > 0.95 && len(s) > 15 {
+		return true
+	}
+	// High ratio of non-alphanumeric characters might indicate obfuscation
+	specialCount := 0
+	for _, ch := range s {
+		if !unicode.IsLetter(ch) && !unicode.IsDigit(ch) && ch != '.' && ch != '-' && ch != '_' {
+			specialCount++
+		}
+	}
+	if float64(specialCount)/float64(len(s)) > 0.3 {
+		return true
+	}
+	return false
+}
+
+// Extract functions for detailed analysis (used by generator)
+
+// extractResolution extracts resolution from a release name
+func extractResolution(s string) string {
+	lower := strings.ToLower(s)
+	if strings.Contains(lower, "2160p") || strings.Contains(lower, "4k") {
+		return "2160p"
+	}
+	if strings.Contains(lower, "1080p") {
+		return "1080p"
+	}
+	if strings.Contains(lower, "720p") {
+		return "720p"
+	}
+	if strings.Contains(lower, "480p") {
+		return "480p"
+	}
+	return ""
+}
+
+// extractSource extracts the source from a release name
+func extractSource(s string) string {
+	lower := strings.ToLower(s)
+	sources := []string{"remux", "web-dl", "webdl", "webrip", "bluray", "bdrip", "dvdrip", "hdtv"}
+	for _, source := range sources {
+		if strings.Contains(lower, source) {
+			return source
+		}
+	}
+	return ""
+}
+
+// extractCodec extracts codec information
+func extractCodec(s string) string {
+	lower := strings.ToLower(s)
+	if strings.Contains(lower, "x264") || strings.Contains(lower, "h.264") {
+		return "h264"
+	}
+	if strings.Contains(lower, "x265") || strings.Contains(lower, "h.265") || strings.Contains(lower, "hevc") {
+		return "hevc"
+	}
+	if strings.Contains(lower, "av1") {
+		return "av1"
+	}
+	return ""
+}
+
+// extractPlatform extracts streaming platform
+func extractPlatform(s string) string {
+	lower := strings.ToLower(s)
+	platforms := []string{"nf", "amzn", "atvp", "hulu", "dsnp", "max", "pmtp", "hbo", "crit", "itunes", "stan"}
+	for _, p := range platforms {
+		if strings.Contains(lower, "."+p+".") {
+			return strings.ToUpper(p)
+		}
+	}
+	return ""
+}
+
+// extractDatePattern extracts date patterns for episodes
+func extractDatePattern(s string) string {
+	if fastDatePattern(s) {
+		// Find and return the actual pattern
+		for i := 0; i < len(s)-9; i++ {
+			if s[i] == '2' && s[i+1] >= '0' && s[i+1] <= '9' &&
+				s[i+2] >= '0' && s[i+2] <= '9' &&
+				(s[i+3] == '.' || s[i+3] == '-') &&
+				s[i+4] >= '0' && s[i+4] <= '9' &&
+				s[i+5] >= '0' && s[i+5] <= '9' &&
+				(s[i+6] == '.' || s[i+6] == '-') &&
+				s[i+7] >= '0' && s[i+7] <= '9' &&
+				s[i+8] >= '0' && s[i+8] <= '9' {
+				return s[i : i+10]
+			}
+		}
+	}
+	return ""
 }
 
 // GetSamples returns samples for a specific category, limited to maxPerCat
@@ -202,164 +442,6 @@ func (s *Sampler) GetSummary() map[Category]int {
 		summary[cat] = len(samples)
 	}
 	return summary
-}
-
-// Helper functions
-
-var (
-	// Quality patterns
-	qualityRegex = regexp.MustCompile(`(?i)\b(2160p|4K|1080p|720p|480p|REMUX|WEB-DL|WEBDL|WEBRip|BluRay|BDRip|DVDRip|HDTV)\b`)
-	// Streaming platforms
-	streamingRegex = regexp.MustCompile(`(?i)\b(NF|AMZN|ATVP|HULU|DSNP|MAX|PMTP|HBO|CRiT|iTUNES|STAN)\b`)
-	// Release groups (common ones)
-	releaseGroupRegex = regexp.MustCompile(`(?i)-(RARBG|YTS|YIFY|FLUX|ETHEL|Kitsune|NTb|CMRG|SPARKS|FGT|DIMENSION|SiGMA|NTb|CONTROL|GECKOS|FLiCKSiCK|RARBG|iNCiTE|DiViDi|HoRnEtS|NBS|DONDAN|FmE|DFE|c0nFuSed|CDC|aAF|ALLiANCE|LiNE|PRoDJi|SFiNH|xOr|DEiTY|DoNE|DMT|TDF|BMD|LTER|WB|FoV|LOL|Sys|EVOLVE|QCF|ASAP|IMMERSE|BATV|2HD|KILLERS|REMARKABLE|OVERMATCH|WAFFLES|ANON|TLA|TLA|AFO|CAA|AOC|AOU|AFG|AJP)[\-.]`)
-	// Date-based episode pattern (YYYY.MM.DD or YYYY-MM-DD)
-	datePatternRegex = regexp.MustCompile(`\b20\d{2}[\.\-]\d{2}[\.\-]\d{2}\b`)
-	// Year edge cases
-	yearEdgeRegex = regexp.MustCompile(`(?i)(\(?\d{4}[ \-–/&]\d{4}\)?|\d{4}\d{4}|\(19\d{2}\)|\(20\d{2}\))`)
-	// Special characters
-	specialCharsRegex = regexp.MustCompile(`[<>:"|?*\[\]{}'` + "`" + `]`)
-	// TV episode patterns
-	tvSEPattern   = regexp.MustCompile(`(?i)\bS\d{1,2}E\d{1,2}\b`)
-	tvXPattern    = regexp.MustCompile(`(?i)\b\d{1,2}x\d{1,2}\b`)
-	tvPartPattern = regexp.MustCompile(`(?i)\bPt\d{1,2}\b`)
-	// Multi-part patterns
-	multiPartRegex = regexp.MustCompile(`(?i)[\-. ](CD\d|Part\d{1,2}|Disk\d|Disc\d)[\-. ]`)
-	// Foreign language indicators
-	foreignRegex = regexp.MustCompile(`(?i)\.(German|French|Spanish|Italian|Japanese|Korean|Russian|Polish|Hindi|Thai|Chinese|Danish|Dutch|Swedish|Norwegian|Finnish|Czech|Greek|Hungarian|Portuguese|Hebrew|Arabic|Turkish|Vietnamese|Bulgarian|Romanian|Slovak|Croatian|Serbian|Ukrainian|Greek|Korean)\.|\b(German|French|Spanish|Italian|Japanese|Korean|Russian|Polish|Hindi|Thai|Chinese|Danish|Dutch|Swedish|Norwegian|Finnish|Czech|Greek|Hungarian|Portuguese|Hebrew|Arabic|Turkish|Vietnamese|Bulgarian|Romanian|Slovak|Croatian|Serbian|Ukrainian)\.(AC3|Dubbed|DUB)\b`)
-	// Obfuscated patterns
-	obfuscatedRegex = regexp.MustCompile(`(?i)^[A-Z0-9]{8,}$|^[a-z0-9]{8,}$|^[A-Z]{2,5}\d{2,}`)
-)
-
-func containsQualityPattern(s string) bool {
-	return qualityRegex.MatchString(s)
-}
-
-func containsStreamingPlatform(s string) bool {
-	return streamingRegex.MatchString(s)
-}
-
-func containsReleaseGroup(s string) bool {
-	return releaseGroupRegex.MatchString(s)
-}
-
-func containsDatePattern(s string) bool {
-	return datePatternRegex.MatchString(s)
-}
-
-func containsYearEdgeCase(s string) bool {
-	return yearEdgeRegex.MatchString(s)
-}
-
-func containsSpecialChars(s string) bool {
-	return specialCharsRegex.MatchString(s)
-}
-
-func containsTVEpisodePattern(s string) bool {
-	return tvSEPattern.MatchString(s) || tvXPattern.MatchString(s) || tvPartPattern.MatchString(s)
-}
-
-func containsMultiPart(s string) bool {
-	return multiPartRegex.MatchString(s)
-}
-
-func containsForeign(s string) bool {
-	return foreignRegex.MatchString(s)
-}
-
-func containsObfuscatedPattern(s string) bool {
-	// Check if the release name is very short and alphanumeric (potential obfuscation)
-	if len(s) < 10 {
-		return false
-	}
-	// High ratio of non-alphanumeric characters might indicate obfuscation
-	specialCount := 0
-	for _, ch := range s {
-		if !unicode.IsLetter(ch) && !unicode.IsDigit(ch) && ch != '.' && ch != '-' && ch != '_' {
-			specialCount++
-		}
-	}
-	if float64(specialCount)/float64(len(s)) > 0.3 {
-		return true
-	}
-	return obfuscatedRegex.MatchString(s)
-}
-
-// Extract functions for detailed analysis
-
-// extractResolution extracts resolution from a release name
-func extractResolution(s string) string {
-	matches := qualityRegex.FindAllString(s, -1)
-	for _, m := range matches {
-		if strings.Contains(strings.ToLower(m), "p") {
-			return strings.ToLower(m)
-		}
-		if m == "4K" || m == "2160p" {
-			return "2160p"
-		}
-	}
-	return ""
-}
-
-// extractSource extracts the source from a release name
-func extractSource(s string) string {
-	s = strings.ToLower(s)
-	sources := []string{"remux", "web-dl", "webdl", "webrip", "bluray", "bdrip", "dvdrip", "hdtv"}
-	for _, source := range sources {
-		if strings.Contains(s, source) {
-			return source
-		}
-	}
-	return ""
-}
-
-// extractCodec extracts codec information
-func extractCodec(s string) string {
-	s = strings.ToLower(s)
-	if strings.Contains(s, "x264") || strings.Contains(s, "h.264") {
-		return "h264"
-	}
-	if strings.Contains(s, "x265") || strings.Contains(s, "h.265") || strings.Contains(s, "hevc") {
-		return "hevc"
-	}
-	if strings.Contains(s, "av1") {
-		return "av1"
-	}
-	return ""
-}
-
-// extractPlatform extracts streaming platform
-func extractPlatform(s string) string {
-	matches := streamingRegex.FindAllString(s, -1)
-	if len(matches) > 0 {
-		return strings.ToUpper(matches[0])
-	}
-	return ""
-}
-
-// extractDatePattern extracts date patterns for episodes
-func extractDatePattern(s string) string {
-	matches := datePatternRegex.FindAllString(s, -1)
-	if len(matches) > 0 {
-		return matches[0]
-	}
-	return ""
-}
-
-// extractYearPattern extracts year patterns
-func extractYearPattern(s string) []string {
-	matches := yearEdgeRegex.FindAllString(s, -1)
-	return matches
-}
-
-// containsAny checks if the string contains any of the substrings
-func containsAny(s string, subs []string) bool {
-	for _, sub := range subs {
-		if strings.Contains(strings.ToLower(s), strings.ToLower(sub)) {
-			return true
-		}
-	}
-	return false
 }
 
 // PrintCategoryList prints all available categories with descriptions
