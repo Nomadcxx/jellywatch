@@ -168,10 +168,18 @@ func (m *MediaDB) getMediaFilesForGroup(title string, year int, season, episode 
 			source, source_priority, library_root,
 			created_at, updated_at
 		FROM media_files
-		WHERE normalized_title = ? AND year = ?
+		WHERE normalized_title = ?
 	`
 
-	args := []interface{}{title, year}
+	args := []interface{}{title}
+
+	// Handle year: 0 means NULL (from grouped NULL years), otherwise use specific value
+	if year != 0 {
+		query += " AND year = ?"
+		args = append(args, year)
+	} else {
+		query += " AND year IS NULL"
+	}
 
 	if season != nil {
 		query += " AND season = ?"
