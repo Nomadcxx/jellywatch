@@ -937,6 +937,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedOption--
 			} else if m.step == stepUpdateNotice && m.selectedOption > 0 {
 				m.selectedOption--
+			} else if m.step == stepUninstallConfirm && m.selectedOption > 0 {
+				m.selectedOption--
 			} else if m.step == stepAI && m.aiModelDropdownOpen {
 				if m.aiModelIndex > 0 {
 					m.aiModelIndex--
@@ -960,6 +962,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.step == stepWelcome && m.selectedOption < 1 {
 				m.selectedOption++
 			} else if m.step == stepUpdateNotice && m.selectedOption < 1 {
+				m.selectedOption++
+			} else if m.step == stepUninstallConfirm && m.selectedOption < 1 {
 				m.selectedOption++
 			} else if m.step == stepAI && m.aiModelDropdownOpen {
 				if m.aiModelIndex < len(m.aiModels)-1 {
@@ -1106,16 +1110,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.step == stepUninstallConfirm {
 				switch msg.String() {
-				case "up", "k":
-					if m.selectedOption > 0 {
-						m.selectedOption--
-					}
-					return m, nil
-				case "down", "j":
-					if m.selectedOption < 1 {
-						m.selectedOption++
-					}
-					return m, nil
 				case "enter":
 					// selectedOption 0 = remove database, 1 = keep database
 					m.keepDatabase = (m.selectedOption == 1)
