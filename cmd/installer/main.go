@@ -138,6 +138,7 @@ type model struct {
 	updateWithRefresh  bool       // true = update + rescan, false = update only
 	forceWizard        bool       // 'W' key pressed to run full wizard
 	daemonWasRunning   bool       // true if daemon was running before update (to restart after)
+	keepDatabase       bool       // true = keep database during uninstall, false = remove it
 
 	// Scan state
 	scanProgress    ScanProgress
