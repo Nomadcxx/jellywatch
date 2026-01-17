@@ -670,16 +670,24 @@ func enableDaemon(m *model) error {
 	return nil
 }
 
+// stopDaemon stops and disables the jellywatchd service.
+// It's robust - doesn't fail if service is already stopped or doesn't exist.
 func stopDaemon(m *model) error {
-	cmd := exec.Command("systemctl", "stop", "jellywatchd")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to stop service: %w", err)
+	// First check if service exists and is active
+	checkCmd := exec.Command("systemctl", "is-active", "jellywatchd")
+	output, _ := checkCmd.Output()
+	state := strings.TrimSpace(string(output))
+
+	// Only try to stop if the service is actually active or activating
+	if state == "active" || state == "activating" || state == "deactivating" {
+		stopCmd := exec.Command("systemctl", "stop", "jellywatchd")
+		if err := stopCmd.Run(); err != nil {
+			return fmt.Errorf("failed to stop service (state: %s): %w", state, err)
+		}
 	}
 
-	cmd = exec.Command("systemctl", "disable", "jellywatchd")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to disable service: %w", err)
-	}
+	// Disable the service (ignore errors if not enabled/doesn't exist)
+	_ = exec.Command("systemctl", "disable", "jellywatchd").Run()
 
 	return nil
 }
