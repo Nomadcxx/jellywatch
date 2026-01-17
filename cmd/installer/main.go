@@ -1027,6 +1027,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.selectedOption = 1
 					}
 				}
+			} else if m.step == stepAI && len(m.inputs) > 0 {
+				// Blur the URL input to allow Enter to open dropdown
+				m.inputs[m.focusedInput].Blur()
+				m.focusedInput = -1
 			}
 		case "t":
 			if m.step == stepSonarr && !m.testingAPI {
