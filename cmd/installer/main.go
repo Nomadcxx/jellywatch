@@ -1339,7 +1339,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if len(m.inputs) > 0 && m.focusedInput < len(m.inputs) {
+	if len(m.inputs) > 0 && m.focusedInput >= 0 && m.focusedInput < len(m.inputs) {
 		var cmd tea.Cmd
 		m.inputs[m.focusedInput], cmd = m.inputs[m.focusedInput].Update(msg)
 		return m, cmd
