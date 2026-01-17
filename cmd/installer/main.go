@@ -1095,6 +1095,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectedOption = 0
 					return m, nil
 				}
+			} else if m.step == stepUninstallConfirm {
+				switch msg.String() {
+				case "up", "k":
+					if m.selectedOption > 0 {
+						m.selectedOption--
+					}
+					return m, nil
+				case "down", "j":
+					if m.selectedOption < 1 {
+						m.selectedOption++
+					}
+					return m, nil
+				case "enter":
+					// selectedOption 0 = remove database, 1 = keep database
+					m.keepDatabase = (m.selectedOption == 1)
+					m.initTasks()
+					m.step = stepInstalling
+					m.currentTaskIndex = 0
+					m.tasks[0].status = statusRunning
+					return m, tea.Batch(m.spinner.Tick, executeTask(0, &m))
+				case "esc":
+					m.step = stepWelcome
+					m.selectedOption = 0
+					return m, nil
+				}
 			} else if m.step == stepWatchDirs || m.step == stepLibraryPaths {
 				m.saveInputsFromStep()
 				if m.step == stepWatchDirs {
