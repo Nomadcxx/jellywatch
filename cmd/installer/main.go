@@ -1052,16 +1052,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.initInputsForStep()
 					}
 				} else {
-					// Uninstall
+					// Uninstall - go to confirmation screen first
 					m.uninstallMode = true
-					m.initTasks()
-					m.step = stepInstalling
-					m.currentTaskIndex = 0
-					m.tasks[0].status = statusRunning
-					return m, tea.Batch(
-						m.spinner.Tick,
-						executeTask(0, &m),
-					)
+					m.selectedOption = 0 // Default: remove database
+					m.step = stepUninstallConfirm
+					return m, nil
 				}
 				return m, nil
 			} else if m.step == stepAI {
