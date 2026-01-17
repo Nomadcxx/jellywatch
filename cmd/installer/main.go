@@ -45,6 +45,7 @@ type installStep int
 const (
 	stepWelcome installStep = iota
 	stepUpdateNotice  // NEW: shown when existing DB detected
+	stepUninstallConfirm // NEW: shown to confirm what to remove during uninstall
 	stepWatchDirs
 	stepLibraryPaths
 	stepSonarr
