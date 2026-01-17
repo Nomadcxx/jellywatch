@@ -221,26 +221,26 @@ type scanCompleteMsg struct {
 }
 
 // detectExistingInstall checks if jellywatch is already installed
-func detectExistingInstall() (exists bool, dbPath string, modTime time.Time) {
-	// Get the actual user's config dir, even if running with sudo
-	var configDir string
-
+// getConfigDir returns the actual user's config dir, respecting SUDO_USER
+func getConfigDir() (string, error) {
 	// If running with sudo, get the original user's home directory
 	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
 		// Running with sudo - get original user's home
 		userInfo, err := user.Lookup(sudoUser)
 		if err == nil {
-			configDir = filepath.Join(userInfo.HomeDir, ".config")
+			return filepath.Join(userInfo.HomeDir, ".config"), nil
 		}
 	}
 
 	// Fallback to standard method
-	if configDir == "" {
-		var err error
-		configDir, err = os.UserConfigDir()
-		if err != nil {
-			return false, "", time.Time{}
-		}
+	return os.UserConfigDir()
+}
+
+// detectExistingInstall checks if jellywatch is already installed
+func detectExistingInstall() (exists bool, dbPath string, modTime time.Time) {
+	configDir, err := getConfigDir()
+	if err != nil {
+		return false, "", time.Time{}
 	}
 
 	dbPath = filepath.Join(configDir, "jellywatch", "media.db")
@@ -744,24 +744,10 @@ func removeSystemdFiles(m *model) error {
 }
 
 func removeConfigAndDB(m *model) error {
-	// Get the actual user's config dir, even if running with sudo
-	var configDir string
-
-	// If running with sudo, get original user's home
-	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
-		userInfo, err := user.Lookup(sudoUser)
-		if err == nil {
-			configDir = filepath.Join(userInfo.HomeDir, ".config")
-		}
-	}
-
-	// Fallback to standard method
-	if configDir == "" {
-		var err error
-		configDir, err = os.UserConfigDir()
-		if err != nil {
-			return fmt.Errorf("failed to get config dir: %w", err)
-		}
+	// Get the actual user's config dir, respecting SUDO_USER
+	configDir, err := getConfigDir()
+	if err != nil {
+		return fmt.Errorf("failed to get config dir: %w", err)
 	}
 
 	jellywatchDir := filepath.Join(configDir, "jellywatch")
@@ -1579,13 +1565,20 @@ func (m *model) runInitialScan() tea.Cmd {
 	return func() tea.Msg {
 		// Create cancellable context for scan
 		ctx, cancel := context.WithCancel(context.Background())
-		
+
 		// Send cancel function to model via message
 		if m.program != nil {
 			m.program.Send(scanStartMsg{cancel: cancel})
 		}
-		
-		db, err := database.Open()
+
+		// Get the correct database path, respecting SUDO_USER
+		configDir, err := getConfigDir()
+		if err != nil {
+			return scanCompleteMsg{err: fmt.Errorf("failed to get config dir: %w", err)}
+		}
+		dbPath := filepath.Join(configDir, "jellywatch", "media.db")
+
+		db, err := database.OpenPath(dbPath)
 		if err != nil {
 			return scanCompleteMsg{err: err}
 		}
