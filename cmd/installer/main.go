@@ -1086,6 +1086,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.aiInstallResult = ""
 				return m, installOllama()
 			}
+		case "m", "M":
+			if m.step == stepAI && m.aiEnabled && len(m.aiModels) > 0 && !m.aiModelDropdownOpen {
+				// Open model dropdown
+				m.aiModelDropdownOpen = true
+				return m, nil
+			}
 		case "enter":
 			if m.step == stepWelcome {
 				if m.selectedOption == 0 {
@@ -1113,12 +1119,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.aiModel = m.aiModels[m.aiModelIndex]
 					}
 					return m, nil
-				} else if m.aiEnabled && len(m.aiModels) > 0 && m.aiModel == "" {
-					// Open dropdown to select model (only if no model selected yet)
-					m.aiModelDropdownOpen = true
-					return m, nil
 				}
-				// Continue to next step
+				// Continue to next step (Enter)
+				m.saveInputsFromStep()
 				m.step = stepPermissions
 				m.initInputsForStep()
 				return m, nil
@@ -2241,7 +2244,7 @@ func (m model) getHelpText() string {
 			helpText = "↑/↓: Navigate  •  Enter: Select  •  Esc: Close  •  Q: Quit"
 		} else if !m.aiInstallingOllama {
 			if m.aiEnabled && len(m.aiModels) > 0 {
-				helpText += "  •  Enter: Open model dropdown"
+				helpText += "  •  M: Select model"
 			}
 			helpText += "  •  Enter: Continue  •  Q: Quit"
 		} else {
