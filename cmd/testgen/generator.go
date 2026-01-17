@@ -11,19 +11,14 @@ import (
 	"time"
 )
 
-// TestRecord represents a test record in JSON format
-type TestRecord struct {
-	Input    string                 `json:"input"`
-	Features map[string]interface{} `json:"features"`
-	Expected map[string]interface{} `json:"expected"` // Empty for manual labeling
-}
-
-// GoldenFile represents a golden test file
-type GoldenFile struct {
-	Description string       `json:"description"`
-	Category    Category     `json:"category"`
-	CreatedAt   string       `json:"created_at"`
-	Records     []TestRecord `json:"records"`
+// GoldenTestCase represents a test case in the format expected by golden_test.go
+type GoldenTestCase struct {
+	Input         string            `json:"input"`
+	File          string            `json:"file,omitempty"`
+	Features      map[string]string `json:"features"`
+	ExpectedTitle string            `json:"expected_title,omitempty"`
+	ExpectedYear  int               `json:"expected_year,omitempty"`
+	ExpectedType  string            `json:"expected_type,omitempty"`
 }
 
 // runGenerate implements the generate command
@@ -140,41 +135,24 @@ func generateOutput(sampler *Sampler, outputPath string) error {
 			continue
 		}
 
-		golden := GoldenFile{
-			Description: CategoryDescription(cat),
-			Category:    cat,
-			CreatedAt:   time.Now().Format(time.RFC3339),
-			Records:     make([]TestRecord, 0, len(samples)),
-		}
-
+		cases := make([]GoldenTestCase, 0, len(samples))
 		for _, sample := range samples {
-			record := TestRecord{
+			tc := GoldenTestCase{
 				Input: sample.Info.ReleaseName,
-				Features: map[string]interface{}{
+				File:  sample.Info.Filename,
+				Features: map[string]string{
 					"filename":  sample.Info.Filename,
-					"size":      sample.Info.Size,
-					"timestamp": sample.Info.Timestamp,
 					"hash":      sample.Info.Hash,
+					"timestamp": sample.Info.Timestamp,
 				},
-				Expected: map[string]interface{}{
-					"type":         nil, // To be filled manually
-					"title":        nil,
-					"year":         nil,
-					"season":       nil,
-					"episode":      nil,
-					"quality":      extractResolution(sample.Info.ReleaseName),
-					"source":       extractSource(sample.Info.ReleaseName),
-					"codec":        extractCodec(sample.Info.ReleaseName),
-					"platform":     extractPlatform(sample.Info.ReleaseName),
-					"date_pattern": extractDatePattern(sample.Info.ReleaseName),
-				},
+				// Expected fields left empty for manual labeling or dynamic testing
 			}
-			golden.Records = append(golden.Records, record)
+			cases = append(cases, tc)
 		}
 
-		// Write golden file
+		// Write golden file as JSON array (no wrapper)
 		goldenPath := filepath.Join(outputPath, "golden", fmt.Sprintf("%s.json", cat))
-		data, err := json.MarshalIndent(golden, "", "  ")
+		data, err := json.MarshalIndent(cases, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to marshal golden file: %w", err)
 		}
@@ -275,7 +253,7 @@ func writeBenchmarkFile(path string, releases []string) error {
 	return nil
 }
 
-// runValidate implements the validate command
+// runValidate validates the generated test data
 func runValidate() {
 	fs := flag.NewFlagSet("validate", flag.ExitOnError)
 	outputPath := fs.String("output", DefaultOutputPath, "Output directory path")
@@ -316,15 +294,15 @@ func runValidate() {
 			continue
 		}
 
-		var golden GoldenFile
-		if err := json.Unmarshal(data, &golden); err != nil {
+		var cases []GoldenTestCase
+		if err := json.Unmarshal(data, &cases); err != nil {
 			fmt.Printf("Error parsing JSON in %s: %v\n", entry.Name(), err)
 			continue
 		}
 
 		validFiles++
-		totalRecords += len(golden.Records)
-		fmt.Printf("  %s: %d records\n", entry.Name(), len(golden.Records))
+		totalRecords += len(cases)
+		fmt.Printf("  %s: %d records\n", entry.Name(), len(cases))
 	}
 
 	fmt.Printf("\nValidation complete:\n")
