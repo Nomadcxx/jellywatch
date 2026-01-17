@@ -1028,9 +1028,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			} else if m.step == stepAI && len(m.inputs) > 0 {
-				// Blur the URL input to allow Enter to open dropdown
-				m.inputs[m.focusedInput].Blur()
-				m.focusedInput = -1
+				// Toggle between URL input focused and blurred
+				if m.focusedInput >= 0 && m.focusedInput < len(m.inputs) {
+					// Input is focused, blur it
+					m.inputs[m.focusedInput].Blur()
+					m.focusedInput = -1
+				} else {
+					// Input is blurred, focus it
+					m.focusedInput = 0
+					m.inputs[0].Focus()
+				}
 			}
 		case "t":
 			if m.step == stepSonarr && !m.testingAPI {
