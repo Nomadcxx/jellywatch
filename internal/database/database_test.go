@@ -796,3 +796,74 @@ func TestNoConflictOnHigherPriorityUpdate(t *testing.T) {
 
 	t.Logf("Conflict recorded for priority override: %v", conflicts)
 }
+
+// TestFindDuplicateEpisodes_NULLYear tests that duplicate episodes with NULL years
+// are correctly detected. This is a regression test for the bug where getMediaFilesForGroup
+// was querying "year = 0" instead of "year IS NULL", causing NULL-year duplicates to be missed.
+func TestFindDuplicateEpisodes_NULLYear(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	season2 := 2
+	episode4 := 4
+
+	// Insert two episodes with same title/year(NULL)/season/episode but different paths
+	episode1 := &MediaFile{
+		Path:            "/mnt/STORAGE5/TVSHOWS/Fallout (2024)/Season 02/Fallout.S02E04.1080p.AMZN.WEB-DL.mkv",
+		Size:            1500000000,
+		MediaType:       "episode",
+		NormalizedTitle: "fallout",
+		Year:            nil, // NULL year - this is the key test case
+		Season:          &season2,
+		Episode:         &episode4,
+		QualityScore:    363,
+		LibraryRoot:     "/mnt/STORAGE5/TVSHOWS",
+	}
+	episode2 := &MediaFile{
+		Path:            "/mnt/STORAGE7/TVSHOWS/Fallout (2024)/Season 02/Fallout.S02E04.The.Great.Journey.mkv",
+		Size:            1400000000,
+		MediaType:       "episode",
+		NormalizedTitle: "fallout",
+		Year:            nil, // NULL year
+		Season:          &season2,
+		Episode:         &episode4,
+		QualityScore:    363,
+		LibraryRoot:     "/mnt/STORAGE7/TVSHOWS",
+	}
+
+	if err := db.UpsertMediaFile(episode1); err != nil {
+		t.Fatalf("Failed to insert episode1: %v", err)
+	}
+	if err := db.UpsertMediaFile(episode2); err != nil {
+		t.Fatalf("Failed to insert episode2: %v", err)
+	}
+
+	// Find duplicates - should find fallout S02E04
+	groups, err := db.FindDuplicateEpisodes()
+	if err != nil {
+		t.Fatalf("FindDuplicateEpisodes failed: %v", err)
+	}
+
+	// Should have at least 1 duplicate group
+	if len(groups) < 1 {
+		t.Errorf("Expected at least 1 duplicate group, got %d", len(groups))
+	}
+
+	// Find the fallout group
+	var falloutGroup *DuplicateGroup
+	for _, g := range groups {
+		if g.NormalizedTitle == "fallout" && g.Season != nil && *g.Season == 2 && g.Episode != nil && *g.Episode == 4 {
+			falloutGroup = &g
+			break
+		}
+	}
+
+	if falloutGroup == nil {
+		t.Fatal("fallout S02E04 duplicate group not found")
+	}
+
+	// Should have 2 files in the group
+	if len(falloutGroup.Files) != 2 {
+		t.Errorf("Expected 2 files in fallout group, got %d", len(falloutGroup.Files))
+	}
+}
