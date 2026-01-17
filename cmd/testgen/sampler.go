@@ -94,6 +94,14 @@ func NewSampler(maxPerCat int, seed int64) *Sampler {
 
 // ClassifyAndSample classifies a release and adds it to samples if appropriate
 func (s *Sampler) ClassifyAndSample(info *ReleaseInfo) {
+	// Filter out non-movie/TV content
+	if isSoftwareRelease(info) {
+		return
+	}
+	if isPornRelease(info) {
+		return
+	}
+
 	categories := s.classify(info.ReleaseName, info.Filename)
 	if len(categories) == 0 {
 		return
@@ -450,4 +458,126 @@ func PrintCategoryList() {
 	for _, cat := range AllCategories {
 		fmt.Printf("  %-20s - %s\n", cat, CategoryDescription(cat))
 	}
+}
+
+// isSoftwareRelease detects software/0day/course releases that should be excluded
+func isSoftwareRelease(info *ReleaseInfo) bool {
+	release := strings.ToUpper(info.ReleaseName)
+	filename := strings.ToUpper(info.Filename)
+
+	// Check file extensions for software
+	softwareExts := []string{".EXE", ".ISO", ".DAA", ".UHA", ".REV", ".RAR", ".ZIP", ".7Z", ".TAR", ".GZ"}
+	for _, ext := range softwareExts {
+		if strings.HasSuffix(filename, ext) {
+			return true
+		}
+	}
+
+	// Software/course keywords in release name
+	softwareKeywords := []string{
+		"-TUTOR", "-BOOKWARE", "-TUTORiAL", "-COURSE", "-TRAINING",
+		"-INSTALL", "-KEYGEN", "-PATCH", "-CRACKED", "-ACTIVATED",
+		"-PLUGINS", "-VST", "-AU", "-AAX", "-RTAS", "-VSTI",
+		"ISO", "DVD-ISO", "CD-ISO",
+		"0DAY", "0DAY",
+		"SOFTWARE", "APPZ", "APPLICATION",
+		"WINALL", "MACOSX", "LINUX", "UNIX", "BSD",
+		"EBOOK", "AUDIOBOOK", "COMIC",
+		"FONT", "SAMPLES", "PRESETS", "SAMPLEPACK",
+		"TEMPLATE", "THEME", "SCRIPT",
+	}
+
+	for _, kw := range softwareKeywords {
+		if strings.Contains(release, kw) {
+			return true
+		}
+	}
+
+	// Educational platforms
+	eduPlatforms := []string{
+		"PLURALSIGHT", "UDACITY", "COURSERA", "LYNDA", "LINKEDIN",
+		"UDEMY", "SKILLSHARE", "CODECADEMY", "TREEHOUSE",
+		"INFORMATORY", "CBT", "CBTNUGGETS", "LARACASTS",
+		"FRONTENDMASTERS", "ACTIONS", "TESTDRIVEN", "PRAGMATIC",
+	}
+
+	for _, plat := range eduPlatforms {
+		if strings.Contains(release, plat) {
+			return true
+		}
+	}
+
+	// Version patterns typical of software (v1.0.0, 2023.12, etc.)
+	// but exclude video resolution patterns
+	if strings.Contains(release, ".V") &&
+		!strings.Contains(release, "1080P") &&
+		!strings.Contains(release, "720P") &&
+		!strings.Contains(release, "2160P") &&
+		!strings.Contains(release, "480P") {
+		// Check for version-like pattern after .V
+		vIdx := strings.Index(release, ".V")
+		if vIdx+4 < len(release) && release[vIdx+3] >= '0' && release[vIdx+3] <= '9' {
+			return true
+		}
+	}
+
+	// Adobe/Microsoft/Autodesk products
+	adobeProducts := []string{"PHOTOSHOP", "ILLUSTRATOR", "PREMIERE", "AFTER", "DREAMWEAVER", "INDESIGN", "ACROBAT"}
+	for _, prod := range adobeProducts {
+		if strings.Contains(release, prod) && strings.Contains(release, "ADOBE") {
+			return true
+		}
+	}
+
+	microsoftProducts := []string{"OFFICE", "WINDOWS", "VISUAL.STUDIO", "SQL.SERVER", "EXCHANGE", "SHAREPOINT"}
+	for _, prod := range microsoftProducts {
+		if strings.Contains(release, prod) && strings.Contains(release, "MICROSOFT") {
+			return true
+		}
+	}
+
+	autodeskProducts := []string{"AUTOCAD", "MAYA", "3DS.MAX", "REVIT", "INVENTOR"}
+	for _, prod := range autodeskProducts {
+		if strings.Contains(release, prod) && strings.Contains(release, "AUTODESK") {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isPornRelease detects adult content releases that should be excluded
+func isPornRelease(info *ReleaseInfo) bool {
+	release := strings.ToUpper(info.ReleaseName)
+
+	// XXX markers (adult content indicator)
+	if strings.Contains(release, ".XXX.") || strings.Contains(release, " XXX.") ||
+		strings.Contains(release, "-XXX.") || strings.HasPrefix(release, "XXX.") {
+		return true
+	}
+
+	// JAV (Japanese Adult Video) markers
+	if strings.Contains(release, ".JAV.") || strings.Contains(release, ".CENSORED.") ||
+		strings.Contains(release, ".UNCENSORED.") {
+		// But only if combined with adult indicators (JAV is ambiguous)
+		if strings.Contains(release, "JAV") || strings.Contains(release, "EBOD-") ||
+			strings.Contains(release, "PPPD-") || strings.Contains(release, "SSIS-") {
+			return true
+		}
+	}
+
+	// Specific adult content studios (very specific patterns)
+	adultStudios := []string{
+		"TEENFIDELITY.", "KELLYMADISON.", "YOUNGLEGALPORN.",
+		"SILOVESME.", "SISLOVESME.", "BROCRUSH.", "MOMLOVES.",
+		"FAMILYSTROKES.", "PASSION-HD.", "WEAREHAIRY.", "LOVEHERFEET.",
+	}
+
+	for _, studio := range adultStudios {
+		if strings.Contains(release, studio) {
+			return true
+		}
+	}
+
+	return false
 }
