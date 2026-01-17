@@ -377,11 +377,17 @@ func initializeDatabase(m *model) error {
 
 func (m *model) initTasks() {
 	if m.uninstallMode {
+		// Build task description based on user's choice
+		dbTaskDesc := "Removing database"
+		if m.keepDatabase {
+			dbTaskDesc = "Preserving database"
+		}
+
 		m.tasks = []installTask{
 			{name: "Stop daemon", description: "Stopping jellywatchd service", execute: stopDaemon, status: statusPending, optional: true},
 			{name: "Remove binaries", description: "Removing /usr/local/bin/jellywatch*", execute: removeBinaries, status: statusPending},
 			{name: "Remove systemd files", description: "Removing systemd service file", execute: removeSystemdFiles, status: statusPending},
-			{name: "Remove config & database", description: "Removing ~/.config/jellywatch (WARNING: deletes all data)", execute: removeConfigAndDB, status: statusPending, optional: true},
+			{name: "Database", description: dbTaskDesc, execute: removeConfigAndDB, status: statusPending},
 		}
 	} else {
 		m.tasks = []installTask{
