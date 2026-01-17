@@ -736,11 +736,20 @@ func removeConfigAndDB(m *model) error {
 	}
 
 	jellywatchDir := filepath.Join(configDir, "jellywatch")
+	dbPath := filepath.Join(jellywatchDir, "media.db")
 
-	if err := os.RemoveAll(jellywatchDir); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to remove config directory: %w", err)
+	if m.keepDatabase {
+		// Only show message - database is preserved
+		fmt.Printf("\n  Database preserved: %s\n", dbPath)
+		return nil
 	}
 
+	// Remove only the database file
+	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove database: %w", err)
+	}
+
+	fmt.Printf("\n  Database removed: %s\n", dbPath)
 	return nil
 }
 
