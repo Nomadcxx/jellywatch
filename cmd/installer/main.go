@@ -744,9 +744,24 @@ func removeSystemdFiles(m *model) error {
 }
 
 func removeConfigAndDB(m *model) error {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		return fmt.Errorf("failed to get config dir: %w", err)
+	// Get the actual user's config dir, even if running with sudo
+	var configDir string
+
+	// If running with sudo, get original user's home
+	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
+		userInfo, err := user.Lookup(sudoUser)
+		if err == nil {
+			configDir = filepath.Join(userInfo.HomeDir, ".config")
+		}
+	}
+
+	// Fallback to standard method
+	if configDir == "" {
+		var err error
+		configDir, err = os.UserConfigDir()
+		if err != nil {
+			return fmt.Errorf("failed to get config dir: %w", err)
+		}
 	}
 
 	jellywatchDir := filepath.Join(configDir, "jellywatch")
