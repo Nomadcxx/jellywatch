@@ -1362,6 +1362,8 @@ func (m model) View() string {
 		mainContent = m.renderWelcome()
 	case stepUpdateNotice:
 		mainContent = m.renderUpdateNotice()
+	case stepUninstallConfirm:
+		mainContent = m.renderUninstallConfirm()
 	case stepWatchDirs:
 		mainContent = m.renderWatchDirs()
 	case stepLibraryPaths:
@@ -1491,6 +1493,38 @@ func (m model) renderUpdateNotice() string {
 	content += "    Reinstalls binaries, keeps existing database\n\n"
 
 	content += lipgloss.NewStyle().Foreground(Secondary).Render("Press W to run first-run wizard instead")
+
+	return content
+}
+
+func (m model) renderUninstallConfirm() string {
+	var content string
+
+	content += lipgloss.NewStyle().Foreground(Primary).Bold(true).Render("Uninstall Confirmation") + "\n\n"
+
+	content += lipgloss.NewStyle().Foreground(FgMuted).Render("The following will be removed:") + "\n\n"
+	content += "  • jellywatch and jellywatchd binaries\n"
+	content += "  • systemd service file\n\n"
+
+	content += lipgloss.NewStyle().Foreground(FgMuted).Render("Choose what to do with the database:") + "\n\n"
+
+	// Option 1: Remove database (default)
+	removePrefix := "  "
+	if m.selectedOption == 0 {
+		removePrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+	}
+	content += removePrefix + "Remove database " + lipgloss.NewStyle().Foreground(SuccessColor).Render("(recommended for clean uninstall)") + "\n"
+	content += "    Deletes learned data, allows fresh reinstall\n\n"
+
+	// Option 2: Keep database
+	keepPrefix := "  "
+	if m.selectedOption == 1 {
+		keepPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+	}
+	content += keepPrefix + "Keep database\n"
+	content += "    Preserves learned data for potential reinstall\n\n"
+
+	content += lipgloss.NewStyle().Foreground(Secondary).Render("Note: config.toml will be preserved regardless of your choice.")
 
 	return content
 }
@@ -2153,6 +2187,8 @@ func (m model) getHelpText() string {
 		return "↑/↓: Navigate  •  Enter: Continue  •  Q/Ctrl+C: Quit"
 	case stepUpdateNotice:
 		return "↑/↓: Navigate  •  Enter: Continue  •  W: Run wizard  •  Esc: Back  •  Q: Quit"
+	case stepUninstallConfirm:
+		return "↑/↓: Navigate  •  Enter: Confirm  •  Esc: Back  •  Q: Quit"
 	case stepWatchDirs, stepLibraryPaths:
 		return "↑/↓: Switch field  •  Enter: Continue  •  Esc: Back  •  Q: Quit"
 	case stepSonarr, stepRadarr:
