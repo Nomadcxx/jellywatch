@@ -1113,8 +1113,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.aiModel = m.aiModels[m.aiModelIndex]
 					}
 					return m, nil
-				} else if m.aiEnabled && len(m.aiModels) > 0 {
-					// Open dropdown to select model
+				} else if m.aiEnabled && len(m.aiModels) > 0 && m.aiModel == "" {
+					// Open dropdown to select model (only if no model selected yet)
 					m.aiModelDropdownOpen = true
 					return m, nil
 				}
