@@ -1008,7 +1008,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.step == stepConfirm && m.selectedOption < 1 {
 				m.selectedOption++
-			} else if len(m.inputs) > 0 && m.focusedInput < len(m.inputs)-1 {
+			} else if len(m.inputs) > 0 && m.focusedInput >= 0 && m.focusedInput < len(m.inputs)-1 {
 				m.inputs[m.focusedInput].Blur()
 				m.focusedInput++
 				m.inputs[m.focusedInput].Focus()
