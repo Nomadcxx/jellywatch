@@ -44,8 +44,8 @@ func TestCheckMovie_NonCompliantFile(t *testing.T) {
 	checker := NewChecker("/media/Movies")
 
 	tests := []struct {
-		name          string
-		path          string
+		name           string
+		path           string
 		expectedIssues []string
 	}{
 		{
@@ -156,8 +156,8 @@ func TestCheckEpisode_NonCompliantFile(t *testing.T) {
 	checker := NewChecker("/media/TV")
 
 	tests := []struct {
-		name          string
-		path          string
+		name           string
+		path           string
 		expectedIssues []string
 	}{
 		{
@@ -350,6 +350,57 @@ func TestIsValidSeasonFolder(t *testing.T) {
 				t.Errorf("isValidSeasonFolder(%s) = %v, expected %v", tt.folder, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestCheckEpisode_UsesParentFolderContext(t *testing.T) {
+	checker := NewChecker("/mnt/STORAGE/TVSHOWS")
+
+	result := checker.CheckEpisode(
+		"/mnt/STORAGE/TVSHOWS/The Simpsons (1989)/Season 01/Simpsons S01E01.mkv",
+	)
+
+	for _, issue := range result.Issues {
+		if len(issue) >= 24 && issue[:24] == "invalid_folder_structure" {
+			t.Errorf("Should not flag folder mismatch when parent folder is authoritative: %s", issue)
+		}
+		if len(issue) >= 12 && issue[:12] == "missing_year" {
+			t.Errorf("Should inherit year from parent folder: %s", issue)
+		}
+	}
+}
+
+func TestExtractShowFromFolderPath(t *testing.T) {
+	tests := []struct {
+		path         string
+		expectedShow string
+		expectedYear string
+	}{
+		{
+			path:         "/mnt/STORAGE/TVSHOWS/The Simpsons (1989)/Season 01/file.mkv",
+			expectedShow: "The Simpsons",
+			expectedYear: "1989",
+		},
+		{
+			path:         "/mnt/STORAGE/TVSHOWS/Family Guy (1999)/Season 22/file.mkv",
+			expectedShow: "Family Guy",
+			expectedYear: "1999",
+		},
+		{
+			path:         "/mnt/STORAGE/TVSHOWS/Marvel Super Hero Adventures (2017)/Season 01/file.mkv",
+			expectedShow: "Marvel Super Hero Adventures",
+			expectedYear: "2017",
+		},
+	}
+
+	for _, tt := range tests {
+		show, year := ExtractShowFromFolderPath(tt.path)
+		if show != tt.expectedShow {
+			t.Errorf("ExtractShowFromFolderPath(%q) show = %q, want %q", tt.path, show, tt.expectedShow)
+		}
+		if year != tt.expectedYear {
+			t.Errorf("ExtractShowFromFolderPath(%q) year = %q, want %q", tt.path, year, tt.expectedYear)
+		}
 	}
 }
 

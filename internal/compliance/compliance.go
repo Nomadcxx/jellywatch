@@ -16,14 +16,14 @@ type ComplianceResult struct {
 
 // IssueType categorizes compliance issues
 const (
-	IssueInvalidFilename      = "invalid_filename"
-	IssueReleaseMarkers       = "release_markers"
-	IssueMissingYear          = "missing_year"
-	IssueInvalidYearFormat    = "invalid_year_format"
+	IssueInvalidFilename        = "invalid_filename"
+	IssueReleaseMarkers         = "release_markers"
+	IssueMissingYear            = "missing_year"
+	IssueInvalidYearFormat      = "invalid_year_format"
 	IssueInvalidFolderStructure = "invalid_folder_structure"
-	IssueWrongSeasonFolder    = "wrong_season_folder"
-	IssueSpecialCharacters    = "special_characters"
-	IssueInvalidPadding       = "invalid_padding"
+	IssueWrongSeasonFolder      = "wrong_season_folder"
+	IssueSpecialCharacters      = "special_characters"
+	IssueInvalidPadding         = "invalid_padding"
 )
 
 // Checker validates media files against Jellyfin naming conventions
@@ -44,11 +44,11 @@ func NewChecker(libraryRoot string) *Checker {
 //   - Movies/Movie Name (YYYY)/Movie Name (YYYY).ext
 //
 // Checks:
-//   1. File is in a movie folder with year
-//   2. Filename matches folder name
-//   3. Year is in parentheses format (YYYY)
-//   4. No release markers (1080p, BluRay, x264, etc)
-//   5. No special characters that break Jellyfin
+//  1. File is in a movie folder with year
+//  2. Filename matches folder name
+//  3. Year is in parentheses format (YYYY)
+//  4. No release markers (1080p, BluRay, x264, etc)
+//  5. No special characters that break Jellyfin
 func (c *Checker) CheckMovie(fullPath string) ComplianceResult {
 	result := ComplianceResult{
 		IsCompliant: true,
@@ -111,12 +111,12 @@ func (c *Checker) CheckMovie(fullPath string) ComplianceResult {
 //   - TV Shows/Show Name (Year)/Season XX/Show Name (Year) SXXEXX.ext
 //
 // Checks:
-//   1. File is in proper Season folder
-//   2. Season number is zero-padded (Season 01, not Season 1)
-//   3. Filename contains SXXEXX format with zero-padding
-//   4. No release markers
-//   5. Year in parentheses
-//   6. No special characters
+//  1. File is in proper Season folder
+//  2. Season number is zero-padded (Season 01, not Season 1)
+//  3. Filename contains SXXEXX format with zero-padding
+//  4. No release markers
+//  5. Year in parentheses
+//  6. No special characters
 func (c *Checker) CheckEpisode(fullPath string) ComplianceResult {
 	result := ComplianceResult{
 		IsCompliant: true,
@@ -124,11 +124,10 @@ func (c *Checker) CheckEpisode(fullPath string) ComplianceResult {
 	}
 
 	filename := filepath.Base(fullPath)
-	seasonFolder := filepath.Base(filepath.Dir(fullPath))
-	showFolder := filepath.Base(filepath.Dir(filepath.Dir(fullPath)))
 	ext := filepath.Ext(filename)
 
-	// Parse TV show from filename
+	ctx := ExtractFolderContext(fullPath)
+
 	tv, err := naming.ParseTVShowName(filename)
 	if err != nil {
 		result.Issues = append(result.Issues, fmt.Sprintf("%s: %v", IssueInvalidFilename, err))
@@ -136,49 +135,38 @@ func (c *Checker) CheckEpisode(fullPath string) ComplianceResult {
 		return result
 	}
 
-	// Check season folder format
-	expectedSeasonFolder := naming.FormatSeasonFolder(tv.Season)
-	if !strings.EqualFold(seasonFolder, expectedSeasonFolder) {
-		result.Issues = append(result.Issues, fmt.Sprintf("%s: expected '%s', found '%s'", IssueWrongSeasonFolder, expectedSeasonFolder, seasonFolder))
+	if !TitleMatchesFolderContext(tv.Title, ctx) {
+		result.Issues = append(result.Issues, fmt.Sprintf("%s: filename title '%s' doesn't match show folder '%s'", IssueInvalidFolderStructure, tv.Title, ctx.ShowName))
 	}
 
-	// Check season padding in folder name
-	if !isValidSeasonFolder(seasonFolder) {
+	expectedSeasonFolder := naming.FormatSeasonFolder(tv.Season)
+	if !strings.EqualFold(ctx.SeasonFolder, expectedSeasonFolder) {
+		result.Issues = append(result.Issues, fmt.Sprintf("%s: expected '%s', found '%s'", IssueWrongSeasonFolder, expectedSeasonFolder, ctx.SeasonFolder))
+	}
+
+	if !isValidSeasonFolder(ctx.SeasonFolder) {
 		result.Issues = append(result.Issues, fmt.Sprintf("%s: season folder must be zero-padded (Season 01, not Season 1)", IssueInvalidPadding))
 	}
 
-	// Check year format
-	if tv.Year == "" {
-		result.Issues = append(result.Issues, fmt.Sprintf("%s: missing year", IssueMissingYear))
-	} else if !naming.HasYearInParentheses(filename) {
-		result.Issues = append(result.Issues, fmt.Sprintf("%s: year must be in format (YYYY)", IssueInvalidYearFormat))
+	if ctx.Year == "" && tv.Year == "" {
+		result.Issues = append(result.Issues, fmt.Sprintf("%s: missing year in both filename and folder", IssueMissingYear))
 	}
 
-	// Check for release markers
 	if hasReleaseMarkers(filename) {
 		result.Issues = append(result.Issues, fmt.Sprintf("%s: contains quality/codec markers", IssueReleaseMarkers))
 	}
 
-	// Check special characters
 	if invalidChars := findInvalidCharacters(filename); len(invalidChars) > 0 {
 		result.Issues = append(result.Issues, fmt.Sprintf("%s: contains invalid characters: %s", IssueSpecialCharacters, strings.Join(invalidChars, ", ")))
 	}
 
-	// Validate expected filename
-	expectedFilename := naming.FormatTVEpisodeFilename(tv.Title, tv.Year, tv.Season, tv.Episode, ext[1:])
+	effectiveYear := tv.Year
+	if effectiveYear == "" && ctx.Year != "" {
+		effectiveYear = ctx.Year
+	}
+	expectedFilename := naming.FormatTVEpisodeFilename(ctx.ShowName, effectiveYear, tv.Season, tv.Episode, ext[1:])
 	if filename != expectedFilename {
 		result.Issues = append(result.Issues, fmt.Sprintf("%s: expected '%s'", IssueInvalidFilename, expectedFilename))
-	}
-
-	// Validate expected show folder name
-	expectedShowFolder := naming.NormalizeTVShowName(tv.Title, tv.Year)
-	if showFolder != expectedShowFolder {
-		result.Issues = append(result.Issues, fmt.Sprintf("%s: show folder should be '%s'", IssueInvalidFolderStructure, expectedShowFolder))
-	}
-
-	// Also check if folder name differs from title (catches missing year cases)
-	if tv.Year == "" && showFolder != tv.Title {
-		result.Issues = append(result.Issues, fmt.Sprintf("%s: folder name doesn't match title", IssueInvalidFolderStructure))
 	}
 
 	result.IsCompliant = len(result.Issues) == 0
@@ -274,10 +262,10 @@ func isValidSeasonFolder(folder string) bool {
 type ComplianceSuggestion struct {
 	OriginalPath  string
 	SuggestedPath string
-	Action        string   // "rename", "move", or "reorganize"
+	Action        string // "rename", "move", or "reorganize"
 	Description   string
 	Issues        []string
-	IsSafeAutoFix bool     // true if this is a low-risk fix (case/punctuation only)
+	IsSafeAutoFix bool // true if this is a low-risk fix (case/punctuation only)
 }
 
 // SuggestCompliantPath returns a suggested Jellyfin-compliant path for a file
