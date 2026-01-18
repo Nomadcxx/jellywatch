@@ -336,43 +336,50 @@ func (c *Checker) suggestMoviePath(fullPath, ext string, suggestion *ComplianceS
 }
 
 func (c *Checker) suggestTVPath(fullPath, ext string, suggestion *ComplianceSuggestion) (*ComplianceSuggestion, error) {
-	filename := filepath.Base(fullPath)
-	seasonFolder := filepath.Base(filepath.Dir(fullPath))
-	showFolder := filepath.Base(filepath.Dir(filepath.Dir(fullPath)))
-	libraryRoot := filepath.Dir(filepath.Dir(filepath.Dir(fullPath)))
+	ctx := ExtractFolderContext(fullPath)
 
-	tv, err := naming.ParseTVShowName(filename)
+	tv, err := naming.ParseTVShowName(filepath.Base(fullPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse TV show name: %w", err)
 	}
 
-	correctShowFolder := naming.NormalizeTVShowName(tv.Title, tv.Year)
-	correctSeasonFolder := naming.FormatSeasonFolder(tv.Season)
-	correctFilename := naming.FormatTVEpisodeFilename(tv.Title, tv.Year, tv.Season, tv.Episode, ext)
-	correctPath := filepath.Join(libraryRoot, correctShowFolder, correctSeasonFolder, correctFilename)
+	showName := ctx.ShowName
+	year := ctx.Year
+	if year == "" && tv.Year != "" {
+		year = tv.Year
+	}
+
+	showFolder := showName
+	if year != "" {
+		showFolder = fmt.Sprintf("%s (%s)", showName, year)
+	}
+
+	seasonFolder := naming.FormatSeasonFolder(tv.Season)
+	correctFilename := naming.FormatTVEpisodeFilename(showName, year, tv.Season, tv.Episode, ext)
+	correctPath := filepath.Join(ctx.LibraryRoot, showFolder, seasonFolder, correctFilename)
 
 	suggestion.SuggestedPath = correctPath
 
-	showDiff := showFolder != correctShowFolder
-	seasonDiff := seasonFolder != correctSeasonFolder
-	fileDiff := filename != correctFilename
+	showDiff := filepath.Base(filepath.Dir(filepath.Dir(fullPath))) != showFolder
+	seasonDiff := filepath.Base(filepath.Dir(fullPath)) != seasonFolder
+	fileDiff := filepath.Base(fullPath) != correctFilename
 
 	if showDiff || seasonDiff {
 		if fileDiff {
 			suggestion.Action = "reorganize"
-			suggestion.Description = fmt.Sprintf("Move to: %s/%s/%s", correctShowFolder, correctSeasonFolder, correctFilename)
+			suggestion.Description = fmt.Sprintf("Move to: %s/%s/%s", showFolder, seasonFolder, correctFilename)
 		} else {
 			suggestion.Action = "move"
-			suggestion.Description = fmt.Sprintf("Move to: %s/%s/", correctShowFolder, correctSeasonFolder)
+			suggestion.Description = fmt.Sprintf("Move to: %s/%s/", showFolder, seasonFolder)
 		}
 	} else {
 		suggestion.Action = "rename"
 		suggestion.Description = fmt.Sprintf("Rename to: %s", correctFilename)
 	}
 
-	suggestion.IsSafeAutoFix = isCaseOrPunctuationOnly(showFolder, correctShowFolder) &&
-		isCaseOrPunctuationOnly(seasonFolder, correctSeasonFolder) &&
-		isCaseOrPunctuationOnly(filename, correctFilename)
+	suggestion.IsSafeAutoFix = isCaseOrPunctuationOnly(filepath.Base(filepath.Dir(filepath.Dir(fullPath))), showFolder) &&
+		isCaseOrPunctuationOnly(filepath.Base(filepath.Dir(fullPath)), seasonFolder) &&
+		isCaseOrPunctuationOnly(filepath.Base(fullPath), correctFilename)
 
 	return suggestion, nil
 }

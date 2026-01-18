@@ -1,6 +1,7 @@
 package compliance
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -401,6 +402,25 @@ func TestExtractShowFromFolderPath(t *testing.T) {
 		if year != tt.expectedYear {
 			t.Errorf("ExtractShowFromFolderPath(%q) year = %q, want %q", tt.path, year, tt.expectedYear)
 		}
+	}
+}
+
+func TestSuggestCompliantPath_PreservesShowFolder(t *testing.T) {
+	checker := NewChecker("/mnt/STORAGE/TVSHOWS")
+
+	suggestion, err := checker.SuggestCompliantPath(
+		"/mnt/STORAGE/TVSHOWS/The Simpsons (1989)/Season 01/Simpsons S01E01.mkv",
+	)
+	if err != nil {
+		t.Fatalf("SuggestCompliantPath failed: %v", err)
+	}
+
+	if !strings.Contains(suggestion.SuggestedPath, "The Simpsons (1989)") {
+		t.Errorf("Suggestion should preserve show folder 'The Simpsons (1989)', got: %s", suggestion.SuggestedPath)
+	}
+
+	if strings.Contains(suggestion.SuggestedPath, "/Simpsons/") {
+		t.Errorf("Should not suggest new 'Simpsons' folder: %s", suggestion.SuggestedPath)
 	}
 }
 
