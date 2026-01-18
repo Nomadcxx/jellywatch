@@ -1428,10 +1428,17 @@ func (m model) View() string {
 		Bold(true)
 
 	title := "jellywatch installer"
+	tagline := "(because why rely on sonarr/radarr)"
 	if m.uninstallMode {
 		title = "jellywatch uninstaller"
+		tagline = "(clean removal of all components)"
 	}
-	titleRendered := titleStyle.Render(title) + "\n"
+
+	taglineStyle := lipgloss.NewStyle().
+		Foreground(Secondary).
+		Italic(true)
+
+	titleRendered := titleStyle.Render(title) + "\n" + taglineStyle.Render(tagline) + "\n\n"
 
 	// Main content based on step
 	var mainContent string
@@ -1471,13 +1478,21 @@ func (m model) View() string {
 	// Combine title and main content
 	contentArea := titleRendered + mainContent
 
-	// Wrap main content in border
+	// Wrap main content in border - make it 50% wider than before
 	sidebarWidth := 10
+	baseContentWidth := m.width - sidebarWidth - 6
+	expandedWidth := int(float64(baseContentWidth) * 1.5)
+
+	// Cap at reasonable width to avoid overflow
+	if expandedWidth > m.width-sidebarWidth-4 {
+		expandedWidth = m.width - sidebarWidth - 4
+	}
+
 	mainStyle := lipgloss.NewStyle().
-		Padding(1, 2).
+		Padding(2, 4).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(Secondary).
-		Width(m.width - sidebarWidth - 6)
+		Width(expandedWidth)
 
 	contentRendered := mainStyle.Render(contentArea)
 
