@@ -44,12 +44,15 @@ HOLDEN.md
 *_REVIEW.md
 *_VERIFICATION.md
 *_INSTRUCTIONS.md
+*_AUDIT.md
+*BUG_REPORT*.md
 PHASE_*.md
 PROJECT_*.md
 GAP_*.md
 INSTALLER_*.md
 PERMISSIONS_*.md
 session-*.md
+*.txt
 test-all.sh
 
 # Development directories

@@ -22,13 +22,14 @@ import (
 
 // Theme colors - Jellyfin
 var (
-	Primary      = lipgloss.Color("#AA5CC3") // Purple (gradient start)
-	Secondary    = lipgloss.Color("#00A4DC") // Cyan/Blue (gradient end)
-	BgBase       = lipgloss.Color("#101010") // Dark background
+	Primary      = lipgloss.Color("#8b0000") // Dark red
+	Secondary    = lipgloss.Color("#cc7722") // Orange/copper
+	Accent       = lipgloss.Color("#f6aa1c") // Bright orange/gold
+	BgBase       = lipgloss.Color("#2d0e0e") // Very dark red/brown
 	FgPrimary    = lipgloss.Color("#FFFFFF") // White text
 	FgMuted      = lipgloss.Color("#888888") // Muted text
-	ErrorColor   = lipgloss.Color("#FF5555") // Red for errors
-	SuccessColor = lipgloss.Color("#00A4DC") // Cyan for success
+	ErrorColor   = lipgloss.Color("#FF5555") // Bright red for errors
+	SuccessColor = lipgloss.Color("#e1ad01") // Yellow/gold for success
 )
 
 // Styles
@@ -1364,28 +1365,73 @@ func (m model) View() string {
 		return warningStyle.Render(warning)
 	}
 
-	var content string
+	// Vertical ASCII sidebar - JELLYWATCH stacked vertically
+	jellywatchVertical := `    ███
+▄▄   ██
+▀██▄▄██
+  ▀▀▀▀▀
 
-	// ASCII Header
-	jellywatchASCII := `  ▀▀        ▀██   ▀██                        ▄▄          ██    
- ▀██ ██▀▀██  ██    ██  ██  ██ ██ ▄ █ ▀▀▀▀██ ▀██▀▀ ██▀▀██ ██▀▀██
-  ██ ██▀▀▀▀  ██    ██  ██  ██ ██▄█▄█ ██▀▀██  ██   ██  ▄▄ ██  ██
-  ██ ▀▀▀▀▀▀ ▀▀▀▀  ▀▀▀▀ ▀▀▀▀██ ▀▀▀▀▀▀ ▀▀▀▀▀▀  ▀▀▀▀ ▀▀▀▀▀▀ ▀▀  ▀▀
-▀▀▀▀                   ▀▀▀▀▀▀                                  `
+██████
+██▄▄
+██▄▄▄▄
+▀▀▀▀▀▀
 
-	content += headerStyle.Render(jellywatchASCII) + "\n\n"
+██
+██
+██▄▄██
+▀▀▀▀▀▀
+
+██
+██
+██▄▄██
+▀▀▀▀▀▀
+
+██   ██
+██▄  ██
+ ▀█████
+     ▀▀
+
+██   ██
+██▄█▄██
+███▀███
+▀▀   ▀▀
+
+ ▄█████
+██▀  ██
+███████
+▀▀   ▀▀
+
+[T]
+[T]
+[T]
+[T]
+
+ ▄█████
+██▀
+██▄▄▄▄▄
+▀▀▀▀▀▀▀
+
+██   ██
+██▄▄▄██
+██▀▀▀██
+▀▀   ▀▀`
+
+	verticalASCII := lipgloss.NewStyle().
+		Foreground(Accent).
+		Bold(true).
+		Padding(0, 1).
+		Render(jellywatchVertical)
 
 	// Title
 	titleStyle := lipgloss.NewStyle().
 		Foreground(SuccessColor).
-		Bold(true).
-		Align(lipgloss.Center)
+		Bold(true)
 
 	title := "jellywatch installer"
 	if m.uninstallMode {
 		title = "jellywatch uninstaller"
 	}
-	content += titleStyle.Render(title) + "\n\n"
+	titleRendered := titleStyle.Render(title) + "\n"
 
 	// Main content based on step
 	var mainContent string
@@ -1422,23 +1468,34 @@ func (m model) View() string {
 		mainContent = "TODO: Other screens"
 	}
 
-	// Wrap in border
+	// Combine title and main content
+	contentArea := titleRendered + mainContent
+
+	// Wrap main content in border
+	sidebarWidth := 10
 	mainStyle := lipgloss.NewStyle().
 		Padding(1, 2).
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(Primary).
-		Width(m.width - 4)
-	content += mainStyle.Render(mainContent) + "\n"
+		BorderForeground(Secondary).
+		Width(m.width - sidebarWidth - 6)
+
+	contentRendered := mainStyle.Render(contentArea)
 
 	// Help text
 	helpText := m.getHelpText()
 	if helpText != "" {
 		helpStyle := lipgloss.NewStyle().
 			Foreground(FgMuted).
-			Italic(true).
-			Align(lipgloss.Center)
-		content += "\n" + helpStyle.Render(helpText)
+			Italic(true)
+		contentRendered += "\n" + helpStyle.Render(helpText)
 	}
+
+	// Join sidebar and content horizontally
+	layout := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		verticalASCII,
+		contentRendered,
+	)
 
 	// Wrap everything in background with centering
 	bgStyle := lipgloss.NewStyle().
@@ -1446,9 +1503,9 @@ func (m model) View() string {
 		Foreground(FgPrimary).
 		Width(m.width).
 		Height(m.height).
-		Align(lipgloss.Center, lipgloss.Top)
+		Align(lipgloss.Center, lipgloss.Center)
 
-	return bgStyle.Render(content)
+	return bgStyle.Render(layout)
 }
 
 func (m model) renderWelcome() string {
