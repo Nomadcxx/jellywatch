@@ -24,6 +24,7 @@ const (
 	IssueWrongSeasonFolder      = "wrong_season_folder"
 	IssueSpecialCharacters      = "special_characters"
 	IssueInvalidPadding         = "invalid_padding"
+	IssueObfuscated             = "obfuscated_filename"
 )
 
 // Checker validates media files against Jellyfin naming conventions
@@ -124,6 +125,13 @@ func (c *Checker) CheckEpisode(fullPath string) ComplianceResult {
 	}
 
 	filename := filepath.Base(fullPath)
+
+	if naming.IsObfuscatedFilename(filename) {
+		result.Issues = append(result.Issues, fmt.Sprintf("%s: obfuscated filename requires AI review", IssueObfuscated))
+		result.IsCompliant = false
+		return result
+	}
+
 	ext := filepath.Ext(filename)
 
 	ctx := ExtractFolderContext(fullPath)

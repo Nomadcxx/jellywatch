@@ -69,3 +69,19 @@ func TitleMatchesFolderContext(parsedTitle string, ctx FolderContext) bool {
 
 	return false
 }
+
+func ClassifySuggestion(currentPath, suggestedPath string) string {
+	currentCtx := ExtractFolderContext(currentPath)
+	suggestedCtx := ExtractFolderContext(suggestedPath)
+
+	if !strings.EqualFold(filepath.Base(filepath.Dir(filepath.Dir(currentPath))),
+		filepath.Base(filepath.Dir(filepath.Dir(suggestedPath)))) {
+		return "RISKY"
+	}
+
+	if currentCtx.LibraryRoot != suggestedCtx.LibraryRoot {
+		return "RISKY"
+	}
+
+	return "SAFE"
+}

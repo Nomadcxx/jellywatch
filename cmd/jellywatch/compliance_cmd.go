@@ -116,17 +116,15 @@ func runCompliance(fixDry, fix, safeOnly, moviesOnly, tvOnly bool) error {
 
 		suggestions = append(suggestions, suggestion)
 
-		if suggestion.IsSafeAutoFix {
+		classification := compliance.ClassifySuggestion(f.Path, suggestion.SuggestedPath)
+		if classification == "SAFE" {
 			safeCount++
 		} else {
 			riskyCount++
 		}
 
 		// Display
-		tag := "[SAFE]"
-		if !suggestion.IsSafeAutoFix {
-			tag = "[RISKY]"
-		}
+		tag := "[" + classification + "]"
 
 		if !fix || fixDry {
 			fmt.Printf("%s %s\n", tag, filepath.Base(f.Path))
