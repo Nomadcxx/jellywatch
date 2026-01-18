@@ -86,3 +86,83 @@ func TestInitAI_ValidationFailureReturnsNil(t *testing.T) {
 		t.Error("Should return nil when validation fails")
 	}
 }
+
+func TestInitAIWithOverride_FlagOverride(t *testing.T) {
+	cfg := &config.Config{
+		AI: config.AIConfig{
+			Enabled:             false,
+			OllamaEndpoint:      "http://localhost:11434",
+			Model:               "gemma:2b",
+			ConfidenceThreshold: 0.8,
+			TimeoutSeconds:      30,
+			CacheEnabled:        true,
+		},
+	}
+
+	db, err := database.OpenInMemory()
+	if err != nil {
+		t.Fatalf("Failed to create test DB: %v", err)
+	}
+	defer db.Close()
+
+	integrator, err := InitAIWithOverride(cfg, db, true)
+	if err != nil {
+		t.Fatalf("InitAIWithOverride failed: %v", err)
+	}
+
+	if integrator == nil {
+		t.Fatal("Expected non-nil integrator when forceEnable=true")
+	}
+
+	if !integrator.IsEnabled() {
+		t.Fatal("Expected integrator to be enabled")
+	}
+
+	integrator.Close()
+}
+
+func TestInitAIWithOverride_NoOverride_Disabled(t *testing.T) {
+	cfg := &config.Config{
+		AI: config.AIConfig{
+			Enabled: false,
+		},
+	}
+
+	db, _ := database.OpenInMemory()
+	defer db.Close()
+
+	integrator, err := InitAIWithOverride(cfg, db, false)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if integrator != nil {
+		t.Fatal("Expected nil integrator when disabled and no override")
+	}
+}
+
+func TestInitAIWithOverride_UsesDefaults(t *testing.T) {
+	cfg := &config.Config{
+		AI: config.AIConfig{
+			Enabled: false,
+		},
+	}
+
+	db, err := database.OpenInMemory()
+	if err != nil {
+		t.Fatalf("Failed to create test DB: %v", err)
+	}
+	defer db.Close()
+
+	integrator, err := InitAIWithOverride(cfg, db, true)
+	if err != nil {
+		t.Logf("AI initialization failed (Ollama may not be running): %v", err)
+		return
+	}
+
+	if integrator == nil {
+		t.Fatal("Expected non-nil integrator with defaults")
+	}
+
+	integrator.Close()
+}

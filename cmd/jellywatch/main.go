@@ -10,8 +10,8 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/ai"
 	"github.com/Nomadcxx/jellywatch/internal/app"
 	"github.com/Nomadcxx/jellywatch/internal/config"
-	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/daemon"
+	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/organizer"
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
@@ -149,8 +149,8 @@ func runOrganize(cmd *cobra.Command, args []string) error {
 // closeableOrganizer wraps an organizer with resources that need cleanup
 type closeableOrganizer struct {
 	*organizer.Organizer
-	db            *database.MediaDB
-	aiIntegrator  *ai.Integrator
+	db           *database.MediaDB
+	aiIntegrator *ai.Integrator
 }
 
 // Close releases resources held by the organizer
@@ -190,7 +190,7 @@ func createOrganizer(target string) (*closeableOrganizer, error) {
 			return nil, fmt.Errorf("failed to open database: %w", err)
 		}
 
-		aiIntegrator, err = app.InitAI(cfg, db)
+		aiIntegrator, err = app.InitAIWithOverride(cfg, db, useAI)
 		if err != nil {
 			db.Close()
 			return nil, fmt.Errorf("failed to initialize AI: %w", err)
@@ -201,7 +201,7 @@ func createOrganizer(target string) (*closeableOrganizer, error) {
 	}
 
 	return &closeableOrganizer{
-		Organizer:     organizer.NewOrganizer([]string{target}, opts...),
+		Organizer:    organizer.NewOrganizer([]string{target}, opts...),
 		db:           db,
 		aiIntegrator: aiIntegrator,
 	}, nil
