@@ -152,7 +152,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 
 	// Initialize AI integrator using shared InitAI function
-	aiIntegrator, err := app.InitAI(cfg, db)
+	aiIntegrator, err := app.InitAI(cfg, db, logger)
 	if err != nil {
 		logger.Warn("daemon", "Failed to initialize AI integrator",
 			logging.F("error", err.Error()))

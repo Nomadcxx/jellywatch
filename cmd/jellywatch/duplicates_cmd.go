@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -62,7 +63,7 @@ func runDuplicates(moviesOnly, tvOnly bool, showFilter string) error {
 		}
 
 		if len(movieGroups) > 0 {
-			fmt.Println("=== Duplicate Movies ===\n")
+			ui.Section("Duplicate Movies")
 
 			for _, group := range movieGroups {
 				if len(group.Files) < 2 {
@@ -77,30 +78,26 @@ func runDuplicates(moviesOnly, tvOnly bool, showFilter string) error {
 					yearStr = fmt.Sprintf(" (%d)", *group.Year)
 				}
 
-				fmt.Printf("=== %s%s ===\n", group.NormalizedTitle, yearStr)
-				fmt.Printf("%-15s | %-8s | %-12s | %-8s | %s\n",
-					"Quality Score", "Size", "Resolution", "Source", "Path")
-				fmt.Println(strings.Repeat("-", 120))
-
+				fmt.Printf("\n%s%s\n", group.NormalizedTitle, yearStr)
+				table := ui.NewTable("Quality", "Size", "Resolution", "Source", "Path", "Action")
 				for _, file := range group.Files {
-					marker := ""
+					action := ui.Error("DELETE")
 					if group.BestFile != nil && file.ID == group.BestFile.ID {
-						marker = "[KEEP]"
+						action = ui.Success("KEEP")
 					} else {
-						marker = "[DELETE]"
 						totalReclaimable += file.Size
 					}
-
-					fmt.Printf("%-15d | %-8s | %-12s | %-8s | %s %s\n",
-						file.QualityScore,
-						formatBytes(file.Size),
+					table.AddRow(
+						fmt.Sprintf("%d", file.QualityScore),
+						ui.FormatBytes(file.Size),
 						file.Resolution,
 						file.SourceType,
 						file.Path,
-						marker)
+						action,
+					)
 				}
-
-				fmt.Printf("\nSpace reclaimable: %s\n\n", formatBytes(group.SpaceReclaimable))
+				table.Render()
+				fmt.Printf("\nSpace reclaimable: %s\n\n", ui.FormatBytes(group.SpaceReclaimable))
 			}
 		}
 	}
@@ -113,7 +110,7 @@ func runDuplicates(moviesOnly, tvOnly bool, showFilter string) error {
 		}
 
 		if len(episodeGroups) > 0 {
-			fmt.Println("=== Duplicate TV Episodes ===\n")
+			ui.Section("Duplicate TV Episodes")
 
 			for _, group := range episodeGroups {
 				if len(group.Files) < 2 {
@@ -138,43 +135,43 @@ func runDuplicates(moviesOnly, tvOnly bool, showFilter string) error {
 					episodeStr = fmt.Sprintf(" S%02dE%02d", *group.Season, *group.Episode)
 				}
 
-				fmt.Printf("=== %s%s%s ===\n", group.NormalizedTitle, yearStr, episodeStr)
-				fmt.Printf("%-15s | %-8s | %-12s | %-8s | %s\n",
-					"Quality Score", "Size", "Resolution", "Source", "Path")
-				fmt.Println(strings.Repeat("-", 120))
-
+				fmt.Printf("\n%s%s%s\n", group.NormalizedTitle, yearStr, episodeStr)
+				table := ui.NewTable("Quality", "Size", "Resolution", "Source", "Path", "Action")
 				for _, file := range group.Files {
-					marker := ""
+					action := ui.Error("DELETE")
 					if group.BestFile != nil && file.ID == group.BestFile.ID {
-						marker = "[KEEP]"
+						action = ui.Success("KEEP")
 					} else {
-						marker = "[DELETE]"
 						totalReclaimable += file.Size
 					}
-
-					fmt.Printf("%-15d | %-8s | %-12s | %-8s | %s %s\n",
-						file.QualityScore,
-						formatBytes(file.Size),
+					table.AddRow(
+						fmt.Sprintf("%d", file.QualityScore),
+						ui.FormatBytes(file.Size),
 						file.Resolution,
 						file.SourceType,
 						file.Path,
-						marker)
+						action,
+					)
 				}
-
-				fmt.Printf("\nSpace reclaimable: %s\n\n", formatBytes(group.SpaceReclaimable))
+				table.Render()
+				fmt.Printf("\nSpace reclaimable: %s\n\n", ui.FormatBytes(group.SpaceReclaimable))
 			}
 		}
 	}
 
 	// Summary
 	if totalGroups == 0 {
-		fmt.Println("✅ No duplicates found!")
+		ui.SuccessMsg("No duplicates found!")
 	} else {
-		fmt.Println("=== Summary ===")
-		fmt.Printf("Duplicate groups: %d\n", totalGroups)
-		fmt.Printf("Total files:      %d\n", totalFiles)
-		fmt.Printf("Space reclaimable: %s\n", formatBytes(totalReclaimable))
-		fmt.Println("\nTo remove duplicates:")
+		ui.Section("Summary")
+		summaryRows := [][]string{
+			{"Duplicate groups", fmt.Sprintf("%d", totalGroups)},
+			{"Total files", fmt.Sprintf("%d", totalFiles)},
+			{"Space reclaimable", ui.FormatBytes(totalReclaimable)},
+		}
+		ui.CompactTable([]string{"Metric", "Value"}, summaryRows)
+		fmt.Println()
+		ui.InfoMsg("To remove duplicates:")
 		fmt.Println("  jellywatch consolidate --generate  # Generate cleanup plans")
 		fmt.Println("  jellywatch consolidate --dry-run   # Preview actions")
 		fmt.Println("  jellywatch consolidate --execute   # Execute cleanup")

@@ -11,6 +11,7 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/consolidate"
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -25,7 +26,7 @@ func newComplianceCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "compliance",
-		Short: "Check and fix Jellyfin naming compliance",
+		Short: "[DEPRECATED] Use 'jellywatch clean --naming' instead",
 		Long: `Analyze media files for Jellyfin naming compliance and optionally fix them.
 
 This command identifies files that don't follow Jellyfin naming conventions:
@@ -40,6 +41,7 @@ Examples:
   jellywatch compliance --fix        # Fix safe issues (case/punctuation only)
   jellywatch compliance --fix --all  # Fix all issues (including risky)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Fprintln(os.Stderr, "⚠️  Warning: 'jellywatch compliance' is deprecated. Use 'jellywatch clean --naming' instead.")
 			return runCompliance(fixDry, fix, safeOnly, movies, tv)
 		},
 	}
@@ -53,6 +55,7 @@ Examples:
 
 	// Hide --all flag, only show in help when needed
 	cmd.Flags().MarkHidden("all")
+	cmd.Hidden = true // Hide from help output
 
 	return cmd
 }
@@ -79,7 +82,7 @@ func runCompliance(fixDry, fix, safeOnly, moviesOnly, tvOnly bool) error {
 	}
 
 	if len(files) == 0 {
-		fmt.Println("All files are Jellyfin compliant!")
+		ui.SuccessMsg("All files are Jellyfin compliant!")
 		return nil
 	}
 
@@ -102,12 +105,13 @@ func runCompliance(fixDry, fix, safeOnly, moviesOnly, tvOnly bool) error {
 	safeCount := 0
 	riskyCount := 0
 	var suggestions []*compliance.ComplianceSuggestion
+	var tableRows [][]string
 
 	for _, f := range files {
 		checker := compliance.NewChecker(f.LibraryRoot)
 		suggestion, err := checker.SuggestCompliantPath(f.Path)
 		if err != nil {
-			fmt.Printf("  ? %s: %v\n", filepath.Base(f.Path), err)
+			ui.ErrorMsg("%s: %v", filepath.Base(f.Path), err)
 			continue
 		}
 		if suggestion == nil {
@@ -116,37 +120,64 @@ func runCompliance(fixDry, fix, safeOnly, moviesOnly, tvOnly bool) error {
 
 		suggestions = append(suggestions, suggestion)
 
-		classification := compliance.ClassifySuggestion(f.Path, suggestion.SuggestedPath)
-		if classification == "SAFE" {
-			safeCount++
-		} else {
-			riskyCount++
+		classification, err := compliance.ClassifySuggestion(f.Path, suggestion.SuggestedPath)
+		if err != nil {
+			ui.ErrorMsg("%s: failed to classify: %v", filepath.Base(f.Path), err)
+			continue
 		}
 
-		// Display
-		tag := "[" + classification + "]"
+		switch classification {
+		case compliance.ClassificationSafe:
+			safeCount++
+		case compliance.ClassificationRisky:
+			riskyCount++
+		case compliance.ClassificationUnknown:
+		}
 
+		// Build table row
 		if !fix || fixDry {
-			fmt.Printf("%s %s\n", tag, filepath.Base(f.Path))
-			fmt.Printf("  Current:  %s\n", f.Path)
-			fmt.Printf("  Fix:      %s\n", suggestion.SuggestedPath)
-			fmt.Printf("  Action:   %s\n", suggestion.Description)
-			if len(suggestion.Issues) > 0 {
-				fmt.Printf("  Issues:   %s\n", strings.Join(suggestion.Issues, ", "))
+			statusStr := classification.String()
+			if classification == compliance.ClassificationSafe {
+				statusStr = ui.Safe(statusStr)
+			} else if classification == compliance.ClassificationRisky {
+				statusStr = ui.Risky(statusStr)
 			}
-			fmt.Println()
+			
+			issuesStr := strings.Join(suggestion.Issues, ", ")
+			if len(issuesStr) > 50 {
+				issuesStr = issuesStr[:47] + "..."
+			}
+			
+			tableRows = append(tableRows, []string{
+				filepath.Base(f.Path),
+				statusStr,
+				issuesStr,
+			})
 		}
 	}
 
-	fmt.Printf("Summary: %d safe fixes, %d risky fixes\n", safeCount, riskyCount)
+	// Display table if not fixing
+	if (!fix || fixDry) && len(tableRows) > 0 {
+		table := ui.NewTable("File", "Status", "Issues")
+		for _, row := range tableRows {
+			table.AddRow(row...)
+		}
+		table.Render()
+		fmt.Println()
+	}
+
+	ui.Section("Summary")
+	fmt.Printf("Safe fixes:  %s\n", ui.Safe(fmt.Sprintf("%d", safeCount)))
+	fmt.Printf("Risky fixes: %s\n", ui.Risky(fmt.Sprintf("%d", riskyCount)))
 
 	if fixDry {
-		fmt.Println("\n[dry-run] No changes made")
+		ui.InfoMsg("Dry run complete - no changes made")
 		return nil
 	}
 
 	if !fix {
-		fmt.Println("\nRun with --fix-dry to preview or --fix to execute")
+		fmt.Println()
+		ui.InfoMsg("Run with --fix-dry to preview or --fix to execute")
 		return nil
 	}
 
@@ -165,12 +196,12 @@ func runCompliance(fixDry, fix, safeOnly, moviesOnly, tvOnly bool) error {
 		// Execute the fix
 		err := executeComplianceFix(s, db)
 		if err != nil {
-			fmt.Printf("  Failed: %s: %v\n", filepath.Base(s.OriginalPath), err)
+			ui.ErrorMsg("%s: %v", filepath.Base(s.OriginalPath), err)
 			failed++
 			continue
 		}
 
-		fmt.Printf("  Fixed: %s\n", filepath.Base(s.OriginalPath))
+		ui.SuccessMsg("Fixed: %s", filepath.Base(s.OriginalPath))
 		fixed++
 
 		// Log operation
@@ -184,7 +215,12 @@ func runCompliance(fixDry, fix, safeOnly, moviesOnly, tvOnly bool) error {
 		)
 	}
 
-	fmt.Printf("\nResult: %d fixed, %d skipped, %d failed\n", fixed, skipped, failed)
+	ui.Section("Fix Results")
+	fmt.Printf("Fixed:   %s\n", ui.Success(fmt.Sprintf("%d", fixed)))
+	fmt.Printf("Skipped: %d\n", skipped)
+	if failed > 0 {
+		fmt.Printf("Failed:  %s\n", ui.Error(fmt.Sprintf("%d", failed)))
+	}
 
 	// Notify Sonarr/Radarr of changes
 	if fixed > 0 {

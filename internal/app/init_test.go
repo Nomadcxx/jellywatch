@@ -23,7 +23,7 @@ func TestInitAI_DisabledReturnsNil(t *testing.T) {
 		},
 	}
 
-	aiIntegrator, err := InitAI(cfg, db)
+	aiIntegrator, err := InitAI(cfg, db, nil)
 	if err != nil {
 		t.Fatalf("InitAI() error = %v", err)
 	}
@@ -52,7 +52,7 @@ func TestInitAI_EnabledCreatesIntegrator(t *testing.T) {
 		},
 	}
 
-	aiIntegrator, err := InitAI(cfg, db)
+	aiIntegrator, err := InitAI(cfg, db, nil)
 	// May fail if Ollama not running, but that's OK for this test
 	// We're testing the initialization logic
 	if err != nil {
@@ -78,7 +78,7 @@ func TestInitAI_ValidationFailureReturnsNil(t *testing.T) {
 		},
 	}
 
-	aiIntegrator, err := InitAI(cfg, db)
+	aiIntegrator, err := InitAI(cfg, db, nil)
 	if err != nil {
 		t.Fatalf("InitAI() error = %v", err)
 	}
@@ -105,7 +105,7 @@ func TestInitAIWithOverride_FlagOverride(t *testing.T) {
 	}
 	defer db.Close()
 
-	integrator, err := InitAIWithOverride(cfg, db, true)
+	integrator, err := InitAIWithOverride(cfg, db, true, nil)
 	if err != nil {
 		t.Fatalf("InitAIWithOverride failed: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestInitAIWithOverride_NoOverride_Disabled(t *testing.T) {
 	db, _ := database.OpenInMemory()
 	defer db.Close()
 
-	integrator, err := InitAIWithOverride(cfg, db, false)
+	integrator, err := InitAIWithOverride(cfg, db, false, nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestInitAIWithOverride_UsesDefaults(t *testing.T) {
 	}
 	defer db.Close()
 
-	integrator, err := InitAIWithOverride(cfg, db, true)
+	integrator, err := InitAIWithOverride(cfg, db, true, nil)
 	if err != nil {
 		t.Logf("AI initialization failed (Ollama may not be running): %v", err)
 		return

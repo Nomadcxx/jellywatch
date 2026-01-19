@@ -9,6 +9,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func newDatabaseCmdDeprecated() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "database",
+		Aliases: []string{"db"},
+		Short:   "[DEPRECATED] Use 'jellywatch tools database' instead",
+		Long:    `DEPRECATED: This command is deprecated. Use 'jellywatch tools database' instead.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Fprintln(os.Stderr, "⚠️  Warning: 'jellywatch database' is deprecated. Use 'jellywatch tools database' instead.")
+			cmd.Help()
+			return nil
+		},
+	}
+	cmd.Hidden = true
+	return cmd
+}
+
 func newDatabaseCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "database",

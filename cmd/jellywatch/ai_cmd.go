@@ -2,12 +2,28 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/Nomadcxx/jellywatch/internal/app"
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/spf13/cobra"
 )
+
+func newAICmdDeprecated() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "ai",
+		Short: "[DEPRECATED] Use 'jellywatch tools ai' instead",
+		Long:  `DEPRECATED: This command is deprecated. Use 'jellywatch tools ai' instead.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Fprintln(os.Stderr, "⚠️  Warning: 'jellywatch ai' is deprecated. Use 'jellywatch tools ai' instead.")
+			cmd.Help()
+			return nil
+		},
+	}
+	cmd.Hidden = true
+	return cmd
+}
 
 func newAICmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -74,7 +90,7 @@ func runAIStatus(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	aiIntegrator, err := app.InitAI(cfg, db)
+	aiIntegrator, err := app.InitAI(cfg, db, nil)
 	if err != nil {
 		fmt.Printf("\nError: AI initialization failed: %v\n", err)
 		return nil
@@ -144,7 +160,7 @@ func runAITest(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 
-	aiIntegrator, err := app.InitAI(cfg, db)
+	aiIntegrator, err := app.InitAI(cfg, db, nil)
 	if err != nil {
 		return fmt.Errorf("AI initialization failed: %w", err)
 	}

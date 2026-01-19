@@ -25,7 +25,7 @@ func newScanCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "scan",
-		Short: "Scan libraries and populate the HOLDEN database",
+		Short: "[DEPRECATED] Use 'jellywatch library scan' instead",
 		Long: `Scan all configured libraries and populate the database.
 
 This command scans your TV and movie libraries to build the HOLDEN database,
@@ -38,6 +38,7 @@ Examples:
   jellywatch scan --sonarr --radarr  # Also sync from Sonarr and Radarr
   jellywatch scan --stats            # Show database stats after scan`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Fprintln(os.Stderr, "⚠️  Warning: 'jellywatch scan' is deprecated. Use 'jellywatch library scan' instead.")
 			return runScan(syncSonarr, syncRadarr, syncFilesystem, showStats)
 		},
 	}
@@ -46,6 +47,7 @@ Examples:
 	cmd.Flags().BoolVar(&syncRadarr, "radarr", false, "Also sync from Radarr")
 	cmd.Flags().BoolVar(&syncFilesystem, "filesystem", true, "Scan filesystem (default: true)")
 	cmd.Flags().BoolVar(&showStats, "stats", true, "Show database stats after scan")
+	cmd.Hidden = true // Hide from help output
 
 	return cmd
 }

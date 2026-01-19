@@ -17,8 +17,10 @@ import (
 	"github.com/Nomadcxx/jellywatch/internal/radarr"
 	"github.com/Nomadcxx/jellywatch/internal/sonarr"
 	"github.com/Nomadcxx/jellywatch/internal/transfer"
+	"github.com/Nomadcxx/jellywatch/internal/ui"
 	"github.com/Nomadcxx/jellywatch/internal/validator"
 	"github.com/Nomadcxx/jellywatch/internal/watcher"
+	"github.com/Nomadcxx/jellywatch/cmd/jellywatch/commands"
 	"github.com/spf13/cobra"
 )
 
@@ -44,15 +46,30 @@ var (
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "jellywatch",
-		Short: "Media file organizer for Jellyfin libraries",
-		Long: `JellyWatch monitors download directories and automatically organizes
-media files according to Jellyfin naming conventions.
+		Short: "Media organizer for Jellyfin libraries",
+		Long: `JellyWatch - Intelligent media organizer for Jellyfin
 
-Features:
-  - Robust file transfers with timeout handling (won't hang on failing disks)
-  - Automatic TV show and movie detection
-  - Jellyfin-compliant naming: "Show Name (Year) S01E01.ext"
-  - Sonarr integration for queue management`,
+QUICK COMMANDS:
+  add <path>         Add media to library (auto-detects files/folders)
+  clean              Clean up library (duplicates, naming issues)
+  watch <dir>        Monitor directory for new media
+
+LIBRARY MANAGEMENT:
+  library scan       Scan libraries into database
+  library status     Show library statistics
+  library validate   Check for naming issues
+
+SETUP & CONFIG:
+  setup              Interactive setup wizard
+  config             Manage configuration
+
+ADVANCED TOOLS:
+  tools sonarr       Sonarr integration
+  tools radarr       Radarr integration
+  tools ai           AI enhancement
+  tools database     Database management
+
+Use "jellywatch <command> --help" for more information about a command.`,
 	}
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.config/jellywatch/config.toml)")
@@ -60,7 +77,32 @@ Features:
 	rootCmd.PersistentFlags().BoolVarP(&dryRun, "dry-run", "n", false, "preview changes without moving files")
 	rootCmd.PersistentFlags().BoolVar(&useAI, "ai", false, "enable AI title enhancement (requires Ollama)")
 	rootCmd.PersistentFlags().BoolVar(&noAI, "no-ai", false, "disable AI title enhancement (overrides config)")
+	
+	var noColor bool
+	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable colored output")
+	
+	// Initialize UI based on flags
+	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		if noColor {
+			ui.DisableColors()
+		}
+	}
 
+	// New commands
+	rootCmd.AddCommand(commands.NewAddCmd())
+	rootCmd.AddCommand(commands.NewCleanCmd())
+	rootCmd.AddCommand(commands.NewLibraryCmd())
+	rootCmd.AddCommand(commands.NewSetupCmd())
+	
+	// Tools command group
+	toolsCmd := commands.NewToolsCmd()
+	toolsCmd.AddCommand(newSonarrCmd())
+	toolsCmd.AddCommand(newRadarrCmd())
+	toolsCmd.AddCommand(newAICmd())
+	toolsCmd.AddCommand(newDatabaseCmd())
+	rootCmd.AddCommand(toolsCmd)
+	
+	// Existing commands (deprecated)
 	rootCmd.AddCommand(newOrganizeCmd())
 	rootCmd.AddCommand(newOrganizeFolderCmd())
 	rootCmd.AddCommand(newConsolidateCmd())
@@ -68,15 +110,15 @@ Features:
 	rootCmd.AddCommand(newScanCmd())
 	rootCmd.AddCommand(newStatusCmd())
 	rootCmd.AddCommand(newValidateCmd())
-	rootCmd.AddCommand(newSonarrCmd())
-	rootCmd.AddCommand(newRadarrCmd())
+	rootCmd.AddCommand(newSonarrCmdDeprecated())
+	rootCmd.AddCommand(newRadarrCmdDeprecated())
 	rootCmd.AddCommand(newWatchCmd())
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newConfigCmd())
-	rootCmd.AddCommand(newDatabaseCmd())
+	rootCmd.AddCommand(newDatabaseCmdDeprecated())
 	rootCmd.AddCommand(newComplianceCmd())
 	rootCmd.AddCommand(newReviewCmd())
-	rootCmd.AddCommand(newAICmd())
+	rootCmd.AddCommand(newAICmdDeprecated())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -86,8 +128,10 @@ Features:
 func newOrganizeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "organize <source> [target-library]",
-		Short: "Organize media files according to Jellyfin standards",
-		Long: `Organize media files from source directory to target library.
+		Short: "[DEPRECATED] Use 'jellywatch add' instead",
+		Long: `DEPRECATED: This command is deprecated. Use 'jellywatch add' instead.
+
+Organize media files from source directory to target library.
 
 If source is a file, organizes that single file.
 If source is a directory, organizes all media files within.
@@ -97,7 +141,10 @@ Examples:
   jellywatch organize /downloads/tv/ --library /media/TV
   jellywatch organize /downloads/movies/ --library /media/Movies --dry-run`,
 		Args: cobra.RangeArgs(1, 2),
-		RunE: runOrganize,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Fprintln(os.Stderr, "⚠️  Warning: 'jellywatch organize' is deprecated. Use 'jellywatch add' instead.")
+			return runOrganize(cmd, args)
+		},
 	}
 
 	cmd.Flags().StringVarP(&libraryPath, "library", "l", "", "target library path")
@@ -190,7 +237,7 @@ func createOrganizer(target string) (*closeableOrganizer, error) {
 			return nil, fmt.Errorf("failed to open database: %w", err)
 		}
 
-		aiIntegrator, err = app.InitAIWithOverride(cfg, db, useAI)
+		aiIntegrator, err = app.InitAIWithOverride(cfg, db, useAI, nil)
 		if err != nil {
 			db.Close()
 			return nil, fmt.Errorf("failed to initialize AI: %w", err)
@@ -274,8 +321,10 @@ func newOrganizeFolderCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "organize-folder <folder> [library]",
-		Short: "Intelligently organize a download folder",
-		Long: `Analyze and organize a download folder containing media and related files.
+		Short: "[DEPRECATED] Use 'jellywatch add' instead",
+		Long: `DEPRECATED: This command is deprecated. Use 'jellywatch add' instead.
+
+Analyze and organize a download folder containing media and related files.
 
 This command analyzes the folder to:
   - Detect the main media file (largest video)
@@ -290,6 +339,7 @@ Examples:
   jellywatch organize-folder /downloads/folder/ --dry-run`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Fprintln(os.Stderr, "⚠️  Warning: 'jellywatch organize-folder' is deprecated. Use 'jellywatch add' instead.")
 			source := args[0]
 
 			target := libraryPath
@@ -334,6 +384,7 @@ Examples:
 	cmd.Flags().BoolVar(&verifyChecksum, "checksum", false, "verify checksum after transfer")
 	cmd.Flags().StringVarP(&backendName, "backend", "b", "auto", "transfer backend: auto, pv, rsync, native")
 	cmd.Flags().BoolVar(&keepExtras, "keep-extras", false, "preserve extra files (trailers, featurettes)")
+	cmd.Hidden = true // Hide from help output
 
 	return cmd
 }
@@ -427,7 +478,7 @@ func printResult(result *organizer.OrganizationResult) {
 func newValidateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "validate <path>",
-		Short: "Validate media files follow Jellyfin naming conventions",
+		Short: "[DEPRECATED] Use 'jellywatch library validate' instead",
 		Long: `Check if media files follow Jellyfin naming conventions.
 
 Reports issues like:
@@ -439,10 +490,14 @@ Examples:
   jellywatch validate /media/TV/Silo/
   jellywatch validate /media/Movies/ --recursive`,
 		Args: cobra.ExactArgs(1),
-		RunE: runValidate,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Fprintln(os.Stderr, "⚠️  Warning: 'jellywatch validate' is deprecated. Use 'jellywatch library validate' instead.")
+			return runValidate(cmd, args)
+		},
 	}
 
 	cmd.Flags().BoolVarP(&recursive, "recursive", "r", true, "validate subdirectories")
+	cmd.Hidden = true // Hide from help output
 
 	return cmd
 }
@@ -506,6 +561,21 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%d files have naming issues", invalid)
 	}
 	return nil
+}
+
+func newSonarrCmdDeprecated() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sonarr",
+		Short: "[DEPRECATED] Use 'jellywatch tools sonarr' instead",
+		Long:  `DEPRECATED: This command is deprecated. Use 'jellywatch tools sonarr' instead.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Fprintln(os.Stderr, "⚠️  Warning: 'jellywatch sonarr' is deprecated. Use 'jellywatch tools sonarr' instead.")
+			cmd.Help()
+			return nil
+		},
+	}
+	cmd.Hidden = true
+	return cmd
 }
 
 func newSonarrCmd() *cobra.Command {
@@ -702,6 +772,21 @@ func newSonarrImportCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func newRadarrCmdDeprecated() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "radarr",
+		Short: "[DEPRECATED] Use 'jellywatch tools radarr' instead",
+		Long:  `DEPRECATED: This command is deprecated. Use 'jellywatch tools radarr' instead.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Fprintln(os.Stderr, "⚠️  Warning: 'jellywatch radarr' is deprecated. Use 'jellywatch tools radarr' instead.")
+			cmd.Help()
+			return nil
+		},
+	}
+	cmd.Hidden = true
+	return cmd
 }
 
 func newRadarrCmd() *cobra.Command {

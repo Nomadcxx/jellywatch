@@ -395,13 +395,38 @@ func TestExtractShowFromFolderPath(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		show, year := ExtractShowFromFolderPath(tt.path)
+		show, year, err := ExtractShowFromFolderPath(tt.path)
+		if err != nil {
+			t.Errorf("ExtractShowFromFolderPath(%q) error = %v", tt.path, err)
+		}
 		if show != tt.expectedShow {
 			t.Errorf("ExtractShowFromFolderPath(%q) show = %q, want %q", tt.path, show, tt.expectedShow)
 		}
 		if year != tt.expectedYear {
 			t.Errorf("ExtractShowFromFolderPath(%q) year = %q, want %q", tt.path, year, tt.expectedYear)
 		}
+	}
+}
+
+func TestSuggestTVPath_UsesCachedComponents(t *testing.T) {
+	checker := NewChecker("/mnt/STORAGE/TVSHOWS")
+
+	suggestion := &ComplianceSuggestion{}
+	result, err := checker.suggestTVPath(
+		"/mnt/STORAGE/TVSHOWS/The Simpsons (1989)/Season 01/Simpsons S01E01.mkv",
+		"mkv",
+		suggestion,
+	)
+
+	if err != nil {
+		t.Fatalf("suggestTVPath failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	// Should preserve show folder context
+	if !strings.Contains(result.SuggestedPath, "The Simpsons (1989)") {
+		t.Errorf("Suggestion should preserve show folder 'The Simpsons (1989)', got: %s", result.SuggestedPath)
 	}
 }
 

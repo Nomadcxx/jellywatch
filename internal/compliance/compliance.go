@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 )
 
@@ -30,12 +31,26 @@ const (
 // Checker validates media files against Jellyfin naming conventions
 type Checker struct {
 	libraryRoot string
+	logger      *logging.Logger
 }
 
 // NewChecker creates a new compliance checker
 func NewChecker(libraryRoot string) *Checker {
 	return &Checker{
 		libraryRoot: libraryRoot,
+		logger:      logging.Nop(),
+	}
+}
+
+func (c *Checker) WithLogger(logger *logging.Logger) *Checker {
+	c.logger = logger
+	return c
+}
+
+func NewCheckerWithLogger(libraryRoot string, logger *logging.Logger) *Checker {
+	return &Checker{
+		libraryRoot: libraryRoot,
+		logger:      logger,
 	}
 }
 
@@ -119,6 +134,8 @@ func (c *Checker) CheckMovie(fullPath string) ComplianceResult {
 //  5. Year in parentheses
 //  6. No special characters
 func (c *Checker) CheckEpisode(fullPath string) ComplianceResult {
+	logger := c.logger
+
 	result := ComplianceResult{
 		IsCompliant: true,
 		Issues:      []string{},
@@ -127,14 +144,25 @@ func (c *Checker) CheckEpisode(fullPath string) ComplianceResult {
 	filename := filepath.Base(fullPath)
 
 	if naming.IsObfuscatedFilename(filename) {
+		logger.Debug("compliance", "Obfuscated filename detected")
 		result.Issues = append(result.Issues, fmt.Sprintf("%s: obfuscated filename requires AI review", IssueObfuscated))
 		result.IsCompliant = false
 		return result
 	}
 
-	ext := filepath.Ext(filename)
+	ctx, err := ExtractFolderContext(fullPath)
+	if err != nil {
+		logger.Warn("compliance", "Failed to extract folder context", logging.F("error", err))
+		result.Issues = append(result.Issues, fmt.Sprintf("%s: %v", IssueInvalidFolderStructure, err))
+		result.IsCompliant = false
+		return result
+	}
 
-	ctx := ExtractFolderContext(fullPath)
+	logger.Debug("compliance", "Checking episode compliance",
+		logging.F("show", ctx.ShowName),
+		logging.F("year", ctx.Year),
+		logging.F("season_folder", ctx.SeasonFolder),
+	)
 
 	tv, err := naming.ParseTVShowName(filename)
 	if err != nil {
@@ -143,38 +171,20 @@ func (c *Checker) CheckEpisode(fullPath string) ComplianceResult {
 		return result
 	}
 
-	if !TitleMatchesFolderContext(tv.Title, ctx) {
-		result.Issues = append(result.Issues, fmt.Sprintf("%s: filename title '%s' doesn't match show folder '%s'", IssueInvalidFolderStructure, tv.Title, ctx.ShowName))
+	// Use validator for all compliance checks
+	validator := NewEpisodeValidator(c)
+	issues := validator.Validate(ctx, tv, filename)
+
+	// Convert issues to strings
+	for _, issue := range issues {
+		result.Issues = append(result.Issues, issue.String())
 	}
 
-	expectedSeasonFolder := naming.FormatSeasonFolder(tv.Season)
-	if !strings.EqualFold(ctx.SeasonFolder, expectedSeasonFolder) {
-		result.Issues = append(result.Issues, fmt.Sprintf("%s: expected '%s', found '%s'", IssueWrongSeasonFolder, expectedSeasonFolder, ctx.SeasonFolder))
-	}
-
-	if !isValidSeasonFolder(ctx.SeasonFolder) {
-		result.Issues = append(result.Issues, fmt.Sprintf("%s: season folder must be zero-padded (Season 01, not Season 1)", IssueInvalidPadding))
-	}
-
-	if ctx.Year == "" && tv.Year == "" {
-		result.Issues = append(result.Issues, fmt.Sprintf("%s: missing year in both filename and folder", IssueMissingYear))
-	}
-
-	if hasReleaseMarkers(filename) {
-		result.Issues = append(result.Issues, fmt.Sprintf("%s: contains quality/codec markers", IssueReleaseMarkers))
-	}
-
-	if invalidChars := findInvalidCharacters(filename); len(invalidChars) > 0 {
-		result.Issues = append(result.Issues, fmt.Sprintf("%s: contains invalid characters: %s", IssueSpecialCharacters, strings.Join(invalidChars, ", ")))
-	}
-
-	effectiveYear := tv.Year
-	if effectiveYear == "" && ctx.Year != "" {
-		effectiveYear = ctx.Year
-	}
-	expectedFilename := naming.FormatTVEpisodeFilename(ctx.ShowName, effectiveYear, tv.Season, tv.Episode, ext[1:])
-	if filename != expectedFilename {
-		result.Issues = append(result.Issues, fmt.Sprintf("%s: expected '%s'", IssueInvalidFilename, expectedFilename))
+	if len(result.Issues) > 0 {
+		logger.Info("compliance", "Compliance check found issues",
+			logging.F("issue_count", len(result.Issues)),
+			logging.F("issues", result.Issues),
+		)
 	}
 
 	result.IsCompliant = len(result.Issues) == 0
@@ -308,23 +318,41 @@ func (c *Checker) SuggestCompliantPath(fullPath string) (*ComplianceSuggestion, 
 }
 
 func (c *Checker) suggestMoviePath(fullPath, ext string, suggestion *ComplianceSuggestion) (*ComplianceSuggestion, error) {
-	filename := filepath.Base(fullPath)
-	currentFolder := filepath.Base(filepath.Dir(fullPath))
-	libraryRoot := filepath.Dir(filepath.Dir(fullPath))
+	// Use PathComponents to cache parsed path elements
+	components, err := ParsePathComponents(fullPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse path components: %w", err)
+	}
 
-	movie, err := naming.ParseMovieName(filename)
+	ctx, err := components.GetContext()
+	if err != nil {
+		return nil, err
+	}
+
+	movie, err := naming.ParseMovieName(components.Filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse movie name: %w", err)
 	}
 
-	correctFolder := naming.NormalizeMovieName(movie.Title, movie.Year)
-	correctFilename := naming.FormatMovieFilename(movie.Title, movie.Year, ext)
-	correctPath := filepath.Join(libraryRoot, correctFolder, correctFilename)
+	// Use folder context for show name and year (authoritative)
+	showName := ctx.ShowName
+	year := ctx.Year
+	if year == "" && movie.Year != "" {
+		year = movie.Year
+	}
+
+	correctFolder := showName
+	if year != "" {
+		correctFolder = fmt.Sprintf("%s (%s)", showName, year)
+	}
+	correctFilename := naming.FormatMovieFilename(showName, year, ext)
+	correctPath := filepath.Join(ctx.LibraryRoot, correctFolder, correctFilename)
 
 	suggestion.SuggestedPath = correctPath
 
-	folderDiff := currentFolder != correctFolder
-	fileDiff := filename != correctFilename
+	// Use cached components instead of repeated filepath operations
+	folderDiff := components.ShowFolder != correctFolder
+	fileDiff := components.Filename != correctFilename
 
 	if folderDiff && fileDiff {
 		suggestion.Action = "reorganize"
@@ -337,16 +365,25 @@ func (c *Checker) suggestMoviePath(fullPath, ext string, suggestion *ComplianceS
 		suggestion.Description = fmt.Sprintf("Rename to: %s", correctFilename)
 	}
 
-	suggestion.IsSafeAutoFix = isCaseOrPunctuationOnly(currentFolder, correctFolder) &&
-		isCaseOrPunctuationOnly(filename, correctFilename)
+	suggestion.IsSafeAutoFix = isCaseOrPunctuationOnly(components.ShowFolder, correctFolder) &&
+		isCaseOrPunctuationOnly(components.Filename, correctFilename)
 
 	return suggestion, nil
 }
 
 func (c *Checker) suggestTVPath(fullPath, ext string, suggestion *ComplianceSuggestion) (*ComplianceSuggestion, error) {
-	ctx := ExtractFolderContext(fullPath)
+	// Use PathComponents to cache parsed path elements
+	components, err := ParsePathComponents(fullPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse path components: %w", err)
+	}
 
-	tv, err := naming.ParseTVShowName(filepath.Base(fullPath))
+	ctx, err := components.GetContext()
+	if err != nil {
+		return nil, err
+	}
+
+	tv, err := naming.ParseTVShowName(components.Filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse TV show name: %w", err)
 	}
@@ -368,9 +405,10 @@ func (c *Checker) suggestTVPath(fullPath, ext string, suggestion *ComplianceSugg
 
 	suggestion.SuggestedPath = correctPath
 
-	showDiff := filepath.Base(filepath.Dir(filepath.Dir(fullPath))) != showFolder
-	seasonDiff := filepath.Base(filepath.Dir(fullPath)) != seasonFolder
-	fileDiff := filepath.Base(fullPath) != correctFilename
+	// Use cached components instead of repeated filepath operations
+	showDiff := components.ShowFolder != showFolder
+	seasonDiff := components.SeasonFolder != seasonFolder
+	fileDiff := components.Filename != correctFilename
 
 	if showDiff || seasonDiff {
 		if fileDiff {
@@ -385,9 +423,9 @@ func (c *Checker) suggestTVPath(fullPath, ext string, suggestion *ComplianceSugg
 		suggestion.Description = fmt.Sprintf("Rename to: %s", correctFilename)
 	}
 
-	suggestion.IsSafeAutoFix = isCaseOrPunctuationOnly(filepath.Base(filepath.Dir(filepath.Dir(fullPath))), showFolder) &&
-		isCaseOrPunctuationOnly(filepath.Base(filepath.Dir(fullPath)), seasonFolder) &&
-		isCaseOrPunctuationOnly(filepath.Base(fullPath), correctFilename)
+	suggestion.IsSafeAutoFix = isCaseOrPunctuationOnly(components.ShowFolder, showFolder) &&
+		isCaseOrPunctuationOnly(components.SeasonFolder, seasonFolder) &&
+		isCaseOrPunctuationOnly(components.Filename, correctFilename)
 
 	return suggestion, nil
 }

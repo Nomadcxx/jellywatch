@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/Nomadcxx/jellywatch/internal/consolidate"
 	"github.com/Nomadcxx/jellywatch/internal/database"
@@ -19,7 +20,7 @@ func newConsolidateCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "consolidate [flags]",
-		Short: "Detect and remove duplicate files using CONDOR system",
+		Short: "[DEPRECATED] Use 'jellywatch clean --duplicates' instead",
 		Long: `Detect duplicate media files and non-compliant filenames using the CONDOR
 database-driven system.
 
@@ -40,6 +41,7 @@ Examples:
   jellywatch consolidate --execute      # Execute pending plans
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Fprintln(os.Stderr, "⚠️  Warning: 'jellywatch consolidate' is deprecated. Use 'jellywatch clean --duplicates' instead.")
 			return runConsolidate(generate, dryRun, execute, status)
 		},
 	}
@@ -48,6 +50,7 @@ Examples:
 	cmd.Flags().BoolVarP(&dryRun, "dry-run", "d", false, "Show what would be done without making changes")
 	cmd.Flags().BoolVar(&execute, "execute", false, "Execute pending consolidation plans")
 	cmd.Flags().BoolVar(&status, "status", false, "Show plan summary")
+	cmd.Hidden = true // Hide from help output
 
 	return cmd
 }
