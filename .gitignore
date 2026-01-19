@@ -29,9 +29,10 @@ Thumbs.db
 
 # Development documentation
 AGENTS.md
-IMPLEMENTATION.md
-IMPLEMENTATION_PLAN_EXTENDED.md
+IMPLEMENTATION*.md
+IMPLEMENTATION_PLAN*.md
 IMPLEMENTATION_REMAINING.md
+IMPLEMENTATION_PORT.md
 CLAUDE.md
 CONDOR.md
 DEOBFUSCATE.md
@@ -50,6 +51,7 @@ PHASE_*.md
 PROJECT_*.md
 GAP_*.md
 INSTALLER_*.md
+INSTALLER_PLAN.md
 PERMISSIONS_*.md
 session-*.md
 *.txt
@@ -61,6 +63,10 @@ docs/plans/
 docs/session-*.md
 docs/*_PLAN.md
 docs/*-architecture.md
+docs/COMPREHENSIVE_FIX_PLAN*.md
+docs/IMPLEMENTATION*.md
+docs/UI_*.md
+docs/audits/
 
 # Development tools
 .claude/
