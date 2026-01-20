@@ -59,13 +59,19 @@ func (m model) renderPaths() string {
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Watch Folders"))
 	b.WriteString("\n\n")
 
+	// Render watch folder inputs
 	for i, wf := range m.watchFolders {
 		prefix := "  "
-		if i == m.watchFolderFocused {
+		if m.focusedInput == i {
 			prefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
 		}
 		b.WriteString(fmt.Sprintf("%s%s (%s)\n", prefix, wf.Label, wf.Type))
-		b.WriteString(fmt.Sprintf("    Paths: %s\n\n", wf.Paths))
+		// Render the actual text input widget
+		if i < len(m.inputs) {
+			b.WriteString(fmt.Sprintf("    Paths: %s\n\n", m.inputs[i].View()))
+		} else {
+			b.WriteString(fmt.Sprintf("    Paths: %s\n\n", wf.Paths))
+		}
 	}
 
 	b.WriteString(lipgloss.NewStyle().Foreground(FgMuted).Render("[+] Add folder  [-] Remove folder"))
@@ -73,8 +79,28 @@ func (m model) renderPaths() string {
 
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Library Paths"))
 	b.WriteString("\n\n")
-	b.WriteString(fmt.Sprintf("  TV Libraries:    %s\n", m.tvLibraryPaths))
-	b.WriteString(fmt.Sprintf("  Movie Libraries: %s\n", m.movieLibraryPaths))
+
+	// Render library path inputs
+	libraryStartIdx := len(m.watchFolders)
+	tvPrefix := "  "
+	if m.focusedInput == libraryStartIdx {
+		tvPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+	}
+	if libraryStartIdx < len(m.inputs) {
+		b.WriteString(fmt.Sprintf("%sTV Libraries:    %s\n", tvPrefix, m.inputs[libraryStartIdx].View()))
+	} else {
+		b.WriteString(fmt.Sprintf("%sTV Libraries:    %s\n", tvPrefix, m.tvLibraryPaths))
+	}
+
+	moviePrefix := "  "
+	if m.focusedInput == libraryStartIdx+1 {
+		moviePrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+	}
+	if libraryStartIdx+1 < len(m.inputs) {
+		b.WriteString(fmt.Sprintf("%sMovie Libraries: %s\n", moviePrefix, m.inputs[libraryStartIdx+1].View()))
+	} else {
+		b.WriteString(fmt.Sprintf("%sMovie Libraries: %s\n", moviePrefix, m.movieLibraryPaths))
+	}
 
 	return b.String()
 }
@@ -85,15 +111,38 @@ func (m model) renderSonarr() string {
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Sonarr Integration"))
 	b.WriteString("\n\n")
 
+	enablePrefix := "  "
+	if m.focusedInput == 0 {
+		enablePrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+	}
 	enabledStr := "No"
 	if m.sonarrEnabled {
 		enabledStr = "Yes"
 	}
-	b.WriteString(fmt.Sprintf("  Enable: %s\n\n", enabledStr))
+	b.WriteString(fmt.Sprintf("%sEnable: %s  (↑/↓ to toggle)\n\n", enablePrefix, enabledStr))
 
 	if m.sonarrEnabled {
-		b.WriteString(fmt.Sprintf("  URL:     %s\n", m.sonarrURL))
-		b.WriteString(fmt.Sprintf("  API Key: %s\n\n", strings.Repeat("•", len(m.sonarrAPIKey))))
+		// Render URL input
+		urlPrefix := "  "
+		if m.focusedInput == 1 && len(m.inputs) > 0 {
+			urlPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		}
+		if len(m.inputs) > 0 {
+			b.WriteString(fmt.Sprintf("%sURL:     %s\n", urlPrefix, m.inputs[0].View()))
+		} else {
+			b.WriteString(fmt.Sprintf("%sURL:     %s\n", urlPrefix, m.sonarrURL))
+		}
+
+		// Render API Key input
+		keyPrefix := "  "
+		if m.focusedInput == 2 && len(m.inputs) > 1 {
+			keyPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		}
+		if len(m.inputs) > 1 {
+			b.WriteString(fmt.Sprintf("%sAPI Key: %s\n\n", keyPrefix, m.inputs[1].View()))
+		} else {
+			b.WriteString(fmt.Sprintf("%sAPI Key: %s\n\n", keyPrefix, strings.Repeat("•", len(m.sonarrAPIKey))))
+		}
 
 		if m.sonarrTesting {
 			b.WriteString("  " + m.spinner.View() + " Testing connection...\n")
@@ -113,15 +162,38 @@ func (m model) renderRadarr() string {
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("Radarr Integration"))
 	b.WriteString("\n\n")
 
+	enablePrefix := "  "
+	if m.focusedInput == 0 {
+		enablePrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+	}
 	enabledStr := "No"
 	if m.radarrEnabled {
 		enabledStr = "Yes"
 	}
-	b.WriteString(fmt.Sprintf("  Enable: %s\n\n", enabledStr))
+	b.WriteString(fmt.Sprintf("%sEnable: %s  (↑/↓ to toggle)\n\n", enablePrefix, enabledStr))
 
 	if m.radarrEnabled {
-		b.WriteString(fmt.Sprintf("  URL:     %s\n", m.radarrURL))
-		b.WriteString(fmt.Sprintf("  API Key: %s\n\n", strings.Repeat("•", len(m.radarrAPIKey))))
+		// Render URL input
+		urlPrefix := "  "
+		if m.focusedInput == 1 && len(m.inputs) > 0 {
+			urlPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		}
+		if len(m.inputs) > 0 {
+			b.WriteString(fmt.Sprintf("%sURL:     %s\n", urlPrefix, m.inputs[0].View()))
+		} else {
+			b.WriteString(fmt.Sprintf("%sURL:     %s\n", urlPrefix, m.radarrURL))
+		}
+
+		// Render API Key input
+		keyPrefix := "  "
+		if m.focusedInput == 2 && len(m.inputs) > 1 {
+			keyPrefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		}
+		if len(m.inputs) > 1 {
+			b.WriteString(fmt.Sprintf("%sAPI Key: %s\n\n", keyPrefix, m.inputs[1].View()))
+		} else {
+			b.WriteString(fmt.Sprintf("%sAPI Key: %s\n\n", keyPrefix, strings.Repeat("•", len(m.radarrAPIKey))))
+		}
 
 		if m.radarrTesting {
 			b.WriteString("  " + m.spinner.View() + " Testing connection...\n")
@@ -214,10 +286,25 @@ func (m model) renderPermissions() string {
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(Primary).Render("File Permissions"))
 	b.WriteString("\n\n")
 
-	b.WriteString(fmt.Sprintf("  User:      %s\n", m.permUser))
-	b.WriteString(fmt.Sprintf("  Group:     %s\n", m.permGroup))
-	b.WriteString(fmt.Sprintf("  File Mode: %s\n", m.permFileMode))
-	b.WriteString(fmt.Sprintf("  Dir Mode:  %s\n", m.permDirMode))
+	fields := []struct {
+		label string
+		idx   int
+	}{
+		{"User:     ", 0},
+		{"Group:    ", 1},
+		{"File Mode:", 2},
+		{"Dir Mode: ", 3},
+	}
+
+	for _, f := range fields {
+		prefix := "  "
+		if m.focusedInput == f.idx {
+			prefix = lipgloss.NewStyle().Foreground(Primary).Render("▸ ")
+		}
+		if f.idx < len(m.inputs) {
+			b.WriteString(fmt.Sprintf("%s%s %s\n", prefix, f.label, m.inputs[f.idx].View()))
+		}
+	}
 
 	b.WriteString("\n" + lipgloss.NewStyle().Foreground(FgMuted).Render(
 		"Files will be owned by this user/group for Jellyfin access"))

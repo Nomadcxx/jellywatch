@@ -201,8 +201,9 @@ func (b *BeamsEffect) Render() string {
 // TypewriterTicker types out roasts one character at a time
 type TypewriterTicker struct {
 	roasts       []string
+	roastsRunes  [][]rune // Pre-converted to runes for proper Unicode handling
 	roastIndex   int
-	charIndex    int
+	charIndex    int // Index into runes, not bytes
 	lastUpdate   time.Time
 	charDelay    time.Duration
 	messageDelay time.Duration
@@ -217,8 +218,15 @@ func NewTypewriterTicker() *TypewriterTicker {
 		roasts[i], roasts[j] = roasts[j], roasts[i]
 	})
 
+	// Pre-convert all roasts to runes for proper Unicode handling
+	roastsRunes := make([][]rune, len(roasts))
+	for i, r := range roasts {
+		roastsRunes[i] = []rune(r)
+	}
+
 	return &TypewriterTicker{
 		roasts:       roasts,
+		roastsRunes:  roastsRunes,
 		roastIndex:   0,
 		charIndex:    0,
 		lastUpdate:   time.Now(),
@@ -244,8 +252,9 @@ func (t *TypewriterTicker) Update() {
 	}
 
 	if now.Sub(t.lastUpdate) >= t.charDelay {
-		currentMessage := t.roasts[t.roastIndex]
-		if t.charIndex >= len(currentMessage) {
+		// Use rune length for proper Unicode character counting
+		currentRunes := t.roastsRunes[t.roastIndex]
+		if t.charIndex >= len(currentRunes) {
 			t.paused = true
 			t.pauseUntil = now.Add(t.messageDelay)
 		} else {
@@ -260,21 +269,26 @@ func (t *TypewriterTicker) Render(width int) string {
 		return strings.Repeat(" ", width)
 	}
 
-	currentMessage := t.roasts[t.roastIndex]
+	currentRunes := t.roastsRunes[t.roastIndex]
 	var result string
 
 	if t.paused {
-		result = currentMessage
+		result = t.roasts[t.roastIndex]
 	} else {
-		result = currentMessage[:t.charIndex] + "█"
+		// Use rune slicing to properly handle Unicode characters
+		result = string(currentRunes[:t.charIndex]) + "█"
 	}
 
+	// Calculate display width using rune count for proper Unicode handling
+	resultRunes := []rune(result)
+	resultLen := len(resultRunes)
+
 	// Center it
-	if len(result) < width {
-		padding := (width - len(result)) / 2
-		result = strings.Repeat(" ", padding) + result + strings.Repeat(" ", width-len(result)-padding)
-	} else if len(result) > width {
-		result = result[:width]
+	if resultLen < width {
+		padding := (width - resultLen) / 2
+		result = strings.Repeat(" ", padding) + result + strings.Repeat(" ", width-resultLen-padding)
+	} else if resultLen > width {
+		result = string(resultRunes[:width])
 	}
 
 	return result

@@ -374,4 +374,34 @@ func (m *model) initInputsForStep() {
 	}
 }
 
-func (m model) proceedFromWelcome() (tea.Model, tea.Cmd) { return m.nextStep() }
+func (m model) proceedFromWelcome() (tea.Model, tea.Cmd) {
+	// Handle selection based on whether existing DB is detected
+	if m.existingDBDetected {
+		// Options: 0=Update, 1=Install, 2=Uninstall
+		switch m.selectedOption {
+		case 0:
+			// Update mode - skip wizard, just rebuild/reinstall binaries
+			m.updateMode = true
+			return m.startInstallation()
+		case 1:
+			// Fresh install
+			return m.nextStep()
+		case 2:
+			// Uninstall
+			m.uninstallMode = true
+			return m.startInstallation()
+		}
+	} else {
+		// Options: 0=Install, 1=Uninstall
+		switch m.selectedOption {
+		case 0:
+			// Fresh install
+			return m.nextStep()
+		case 1:
+			// Uninstall
+			m.uninstallMode = true
+			return m.startInstallation()
+		}
+	}
+	return m.nextStep()
+}

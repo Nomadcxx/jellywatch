@@ -187,7 +187,10 @@ func setupSystemd(m *model) error {
 	}
 
 	actualUser := getActualUser()
-	configDir, _ := getConfigDir()
+	configDir, err := getConfigDir()
+	if err != nil {
+		return fmt.Errorf("failed to get config directory: %w", err)
+	}
 
 	serviceContent := fmt.Sprintf(`[Unit]
 Description=JellyWatch Media Organizer Daemon
