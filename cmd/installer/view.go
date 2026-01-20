@@ -135,16 +135,3 @@ func (m model) getHelpText() string {
 	}
 	return ""
 }
-
-func (m model) renderWelcome() string {
-	return "Welcome to JellyWatch Installer\n\nPress Enter to continue"
-}
-func (m model) renderPaths() string       { return "Paths Configuration\n\n[Coming in next batch]" }
-func (m model) renderSonarr() string      { return "Sonarr Integration\n\n[Coming in next batch]" }
-func (m model) renderRadarr() string      { return "Radarr Integration\n\n[Coming in next batch]" }
-func (m model) renderAI() string          { return "AI Configuration\n\n[Coming in next batch]" }
-func (m model) renderPermissions() string { return "Permissions\n\n[Coming in next batch]" }
-func (m model) renderService() string     { return "Service Configuration\n\n[Coming in next batch]" }
-func (m model) renderConfirm() string     { return "Confirm Installation\n\n[Coming in next batch]" }
-func (m model) renderInstalling() string  { return "Installing...\n\n[Coming in next batch]" }
-func (m model) renderComplete() string    { return "Installation Complete!\n\nPress Enter to exit" }
