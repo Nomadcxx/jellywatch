@@ -374,27 +374,4 @@ func (m *model) initInputsForStep() {
 	}
 }
 
-func (m *model) initPathsInputs()       {}
-func (m *model) initSonarrInputs()      {}
-func (m *model) initRadarrInputs()      {}
-func (m *model) initAIInputs()          {}
-func (m *model) initPermissionsInputs() {}
-func (m *model) savePathsInputs()       {}
-func (m *model) saveSonarrInputs()      {}
-func (m *model) saveRadarrInputs()      {}
-func (m *model) saveAIInputs()          {}
-func (m *model) savePermissionsInputs() {}
-
-func (m model) proceedFromWelcome() (tea.Model, tea.Cmd)                      { return m.nextStep() }
-func (m model) addWatchFolder() (tea.Model, tea.Cmd)                          { return m, nil }
-func (m model) removeWatchFolder() (tea.Model, tea.Cmd)                       { return m, nil }
-func (m model) testSonarr() (tea.Model, tea.Cmd)                              { return m, nil }
-func (m model) testRadarr() (tea.Model, tea.Cmd)                              { return m, nil }
-func (m model) detectOllama() (tea.Model, tea.Cmd)                            { return m, nil }
-func (m model) testOllamaConnection() (tea.Model, tea.Cmd)                    { return m, nil }
-func (m model) testOllamaPrompt() (tea.Model, tea.Cmd)                        { return m, nil }
-func (m model) startInstallation() (tea.Model, tea.Cmd)                       { return m, nil }
-func (m model) handleTaskComplete(msg taskCompleteMsg) (tea.Model, tea.Cmd)   { return m, nil }
-func (m model) handleAPITestResult(msg apiTestResultMsg) (tea.Model, tea.Cmd) { return m, nil }
-func (m model) handleAIModels(msg aiModelsMsg) (tea.Model, tea.Cmd)           { return m, nil }
-func (m model) handleAIPromptTest(msg aiPromptTestMsg) (tea.Model, tea.Cmd)   { return m, nil }
+func (m model) proceedFromWelcome() (tea.Model, tea.Cmd) { return m.nextStep() }
