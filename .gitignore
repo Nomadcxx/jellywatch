@@ -58,6 +58,21 @@ docs/plans/
 docs/session-*.md
 docs/*_PLAN.md
 docs/*-architecture.md
+docs/COMPREHENSIVE_FIX_PLAN*.md
+docs/IMPLEMENTATION*.md
+docs/UI_*.md
+docs/audits/
+
+# Bug reports and session transcripts
+JELLYWATCH_BUG_REPORT_*.md
+2026-*.txt
+
+# Demo/experimental binaries
+demo-ui
+cmd/demo-ui/
+
+# Test data (generated)
+internal/naming/testdata/
 
 # Development tools
 .claude/
