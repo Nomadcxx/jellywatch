@@ -13,9 +13,9 @@ var (
 	FgPrimary    = lipgloss.Color("#ffffff")
 	FgSecondary  = lipgloss.Color("#cccccc")
 	FgMuted      = lipgloss.Color("#666666")
-	ErrorColor   = lipgloss.Color("#ff6666")
-	WarningColor = lipgloss.Color("#888888")
-	SuccessColor = lipgloss.Color("#66ff66")
+	ErrorColor   = lipgloss.Color("#ffffff")  // White (monochrome)
+	WarningColor = lipgloss.Color("#888888")  // Medium gray
+	SuccessColor = lipgloss.Color("#ffffff")  // White (monochrome)
 )
 
 // Styles
