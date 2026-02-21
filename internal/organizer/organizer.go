@@ -10,6 +10,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/analyzer"
 	"github.com/Nomadcxx/jellywatch/internal/database"
+	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/library"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/quality"
@@ -47,6 +48,9 @@ type Organizer struct {
 	sonarrClient   *sonarr.Client
 	db             *database.MediaDB
 	syncService    *syncsvc.SyncService
+	playbackSafety bool
+	playbackLocks  *jellyfin.PlaybackLockManager
+	deferredQueue  *jellyfin.DeferredQueue
 }
 
 func NewOrganizer(libraries []string, options ...func(*Organizer)) (*Organizer, error) {
@@ -156,6 +160,21 @@ func WithSyncService(svc *syncsvc.SyncService) func(*Organizer) {
 	}
 }
 
+// WithPlaybackLockManager enables playback safety checks against webhook lock state.
+func WithPlaybackLockManager(mgr *jellyfin.PlaybackLockManager) func(*Organizer) {
+	return func(o *Organizer) {
+		o.playbackLocks = mgr
+		o.playbackSafety = mgr != nil
+	}
+}
+
+// WithDeferredQueue configures where playback-blocked operations should be enqueued.
+func WithDeferredQueue(queue *jellyfin.DeferredQueue) func(*Organizer) {
+	return func(o *Organizer) {
+		o.deferredQueue = queue
+	}
+}
+
 func (o *Organizer) buildTransferOptions() transfer.TransferOptions {
 	return transfer.TransferOptions{
 		Timeout:       o.timeout,
@@ -194,6 +213,41 @@ func (o *Organizer) applyDirOwnership(path string) error {
 	return nil
 }
 
+func (o *Organizer) checkPlaybackSafety(sourcePath string) error {
+	return o.checkPlaybackSafetyWithOp(sourcePath, "", "")
+}
+
+func (o *Organizer) checkPlaybackSafetyWithOp(sourcePath, opType, targetPath string) error {
+	if !o.playbackSafety || o.playbackLocks == nil {
+		return nil
+	}
+
+	lockedPath := sourcePath
+	locked, info := o.playbackLocks.IsLocked(sourcePath)
+	if !locked && strings.TrimSpace(targetPath) != "" {
+		if targetLocked, targetInfo := o.playbackLocks.IsLocked(targetPath); targetLocked {
+			lockedPath = targetPath
+			locked = true
+			info = targetInfo
+		}
+	}
+
+	if locked && info != nil {
+		if o.deferredQueue != nil && opType != "" {
+			o.deferredQueue.Add(lockedPath, jellyfin.DeferredOp{
+				Type:       opType,
+				SourcePath: sourcePath,
+				TargetPath: targetPath,
+				Reason:     "blocked by active playback",
+				DeferredAt: time.Now(),
+			})
+		}
+		return fmt.Errorf("file is being streamed by %s on %s, deferring operation", info.UserName, info.DeviceName)
+	}
+
+	return nil
+}
+
 func (o *Organizer) OrganizeMovie(sourcePath, libraryPath string) (*OrganizationResult, error) {
 	filename := filepath.Base(sourcePath)
 	sourceQuality := quality.Parse(filename)
@@ -212,6 +266,17 @@ func (o *Organizer) OrganizeMovie(sourcePath, libraryPath string) (*Organization
 	movieDir := filepath.Join(libraryPath, cleanName)
 	ext := filepath.Ext(sourcePath)
 	targetPath := filepath.Join(movieDir, cleanName+ext)
+
+	if err := o.checkPlaybackSafetyWithOp(sourcePath, "organize_movie", targetPath); err != nil {
+		return &OrganizationResult{
+			Success:    false,
+			SourcePath: sourcePath,
+			TargetPath: targetPath,
+			Skipped:    true,
+			SkipReason: err.Error(),
+			Error:      err,
+		}, nil
+	}
 
 	existingFile, existingQuality := o.findExistingMediaFile(movieDir)
 	if existingFile != "" && !o.forceOverwrite {
@@ -342,6 +407,17 @@ func (o *Organizer) OrganizeTVEpisode(sourcePath, libraryPath string) (*Organiza
 	ext := filepath.Ext(sourcePath)
 	episodeName := naming.FormatTVEpisodeFilename(tv.Title, tv.Year, tv.Season, tv.Episode, ext[1:])
 	targetPath := filepath.Join(seasonDir, episodeName)
+
+	if err := o.checkPlaybackSafetyWithOp(sourcePath, "organize_tv", targetPath); err != nil {
+		return &OrganizationResult{
+			Success:    false,
+			SourcePath: sourcePath,
+			TargetPath: targetPath,
+			Skipped:    true,
+			SkipReason: err.Error(),
+			Error:      err,
+		}, nil
+	}
 
 	existingFile, existingQuality := o.findExistingMediaFile(seasonDir)
 	if existingFile != "" && !o.forceOverwrite {

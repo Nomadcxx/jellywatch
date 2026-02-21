@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/activity"
+	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/naming"
 	"github.com/Nomadcxx/jellywatch/internal/notify"
@@ -34,6 +35,8 @@ type MediaHandler struct {
 	logger          *logging.Logger
 	sonarrClient    *sonarr.Client
 	activityLogger  *activity.Logger
+	playbackLocks   *jellyfin.PlaybackLockManager
+	deferredQueue   *jellyfin.DeferredQueue
 }
 
 type Stats struct {
@@ -113,6 +116,8 @@ type MediaHandlerConfig struct {
 	DirMode         os.FileMode
 	SonarrClient    *sonarr.Client
 	ConfigDir       string
+	PlaybackLocks   *jellyfin.PlaybackLockManager
+	DeferredQueue   *jellyfin.DeferredQueue
 }
 
 func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
@@ -142,6 +147,8 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		organizer.WithDryRun(cfg.DryRun),
 		organizer.WithTimeout(cfg.Timeout),
 		organizer.WithBackend(cfg.Backend),
+		organizer.WithPlaybackLockManager(cfg.PlaybackLocks),
+		organizer.WithDeferredQueue(cfg.DeferredQueue),
 	}
 	if cfg.SonarrClient != nil {
 		tvOrgOpts = append(tvOrgOpts, organizer.WithSonarrClient(cfg.SonarrClient))
@@ -159,6 +166,8 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		organizer.WithDryRun(cfg.DryRun),
 		organizer.WithTimeout(cfg.Timeout),
 		organizer.WithBackend(cfg.Backend),
+		organizer.WithPlaybackLockManager(cfg.PlaybackLocks),
+		organizer.WithDeferredQueue(cfg.DeferredQueue),
 	}
 	if cfg.TargetUID >= 0 || cfg.TargetGID >= 0 || cfg.FileMode != 0 || cfg.DirMode != 0 {
 		movieOrgOpts = append(movieOrgOpts, organizer.WithPermissions(cfg.TargetUID, cfg.TargetGID, cfg.FileMode, cfg.DirMode))
@@ -183,6 +192,8 @@ func NewMediaHandler(cfg MediaHandlerConfig) (*MediaHandler, error) {
 		logger:          cfg.Logger,
 		sonarrClient:    cfg.SonarrClient,
 		activityLogger:  activityLogger,
+		playbackLocks:   cfg.PlaybackLocks,
+		deferredQueue:   cfg.DeferredQueue,
 	}, nil
 }
 
@@ -473,6 +484,74 @@ func (h *MediaHandler) Shutdown() {
 	if h.activityLogger != nil {
 		h.activityLogger.Close()
 	}
+}
+
+func (h *MediaHandler) PlaybackLockManager() *jellyfin.PlaybackLockManager {
+	return h.playbackLocks
+}
+
+func (h *MediaHandler) DeferredQueue() *jellyfin.DeferredQueue {
+	return h.deferredQueue
+}
+
+// HandleJellyfinWebhookEvent mutates playback state from webhook events.
+func (h *MediaHandler) HandleJellyfinWebhookEvent(event jellyfin.WebhookEvent) {
+	path := strings.TrimSpace(event.ItemPath)
+	switch event.NotificationType {
+	case jellyfin.EventPlaybackStart:
+		if path == "" || h.playbackLocks == nil {
+			return
+		}
+		h.playbackLocks.Lock(path, jellyfin.PlaybackInfo{
+			UserName:   event.UserName,
+			DeviceName: event.DeviceName,
+			ClientName: event.ClientName,
+			ItemID:     event.ItemID,
+			StartedAt:  time.Now(),
+		})
+		if h.logger != nil {
+			h.logger.Info("handler", "Playback lock added", logging.F("path", path), logging.F("user", event.UserName))
+		}
+	case jellyfin.EventPlaybackStop:
+		if path == "" {
+			return
+		}
+		if h.playbackLocks != nil {
+			h.playbackLocks.Unlock(path)
+		}
+		h.replayDeferredOperationsForPath(path)
+		if h.logger != nil {
+			h.logger.Info("handler", "Playback lock removed", logging.F("path", path))
+		}
+	}
+}
+
+func (h *MediaHandler) replayDeferredOperationsForPath(path string) {
+	if h.deferredQueue == nil {
+		return
+	}
+	ops := h.deferredQueue.RemoveForPath(path)
+	for _, op := range ops {
+		h.replayDeferredOperation(op)
+	}
+}
+
+func (h *MediaHandler) replayDeferredOperation(op jellyfin.DeferredOp) {
+	if strings.TrimSpace(op.SourcePath) == "" {
+		return
+	}
+	// Replay requires a fully initialized handler pipeline.
+	if h.logger == nil || h.tvOrganizer == nil || h.movieOrganizer == nil {
+		return
+	}
+	if h.logger != nil {
+		h.logger.Info("handler", "Replaying deferred operation",
+			logging.F("type", op.Type),
+			logging.F("source", op.SourcePath),
+			logging.F("target", op.TargetPath))
+	}
+	// Re-run through the regular process pipeline so classification and notifications stay consistent.
+	go h.processFile(op.SourcePath)
 }
 
 func (h *MediaHandler) PruneActivityLogs(days int) error {

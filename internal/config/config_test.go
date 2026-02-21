@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -41,5 +42,29 @@ func TestAIConfig_CircuitBreakerDefaults(t *testing.T) {
 	}
 	if cfg.CircuitBreaker.CooldownSeconds != 30 {
 		t.Errorf("expected cooldown 30s, got %d", cfg.CircuitBreaker.CooldownSeconds)
+	}
+}
+
+func TestDefaultConfig_JellyfinWebhookSecretEmpty(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Jellyfin.WebhookSecret != "" {
+		t.Fatalf("expected empty webhook secret by default, got %q", cfg.Jellyfin.WebhookSecret)
+	}
+}
+
+func TestToTOML_ContainsJellyfinWebhookSecret(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Jellyfin.Enabled = true
+	cfg.Jellyfin.URL = "http://localhost:8096"
+	cfg.Jellyfin.APIKey = "abc123"
+	cfg.Jellyfin.NotifyOnImport = true
+	cfg.Jellyfin.WebhookSecret = "secret-token"
+
+	content := cfg.ToTOML()
+	if !strings.Contains(content, "[jellyfin]") {
+		t.Fatalf("expected TOML to contain [jellyfin] section")
+	}
+	if !strings.Contains(content, "webhook_secret = \"secret-token\"") {
+		t.Fatalf("expected TOML to include webhook secret")
 	}
 }

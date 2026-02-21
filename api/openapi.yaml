@@ -454,6 +454,27 @@ paths:
                   version:
                     type: string
 
+  # ============ WEBHOOKS ============
+  /webhooks/jellyfin:
+    post:
+      operationId: jellyfinWebhook
+      summary: Receive Jellyfin webhook events
+      tags: [Webhooks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Event accepted
+        '400':
+          description: Invalid payload
+        '401':
+          description: Invalid or missing webhook secret
+
 components:
   schemas:
     # Dashboard

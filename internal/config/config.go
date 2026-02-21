@@ -30,6 +30,7 @@ type Config struct {
 	Options     OptionsConfig     `mapstructure:"options"`
 	Sonarr      SonarrConfig      `mapstructure:"sonarr"`
 	Radarr      RadarrConfig      `mapstructure:"radarr"`
+	Jellyfin    JellyfinConfig    `mapstructure:"jellyfin"`
 	Logging     LoggingConfig     `mapstructure:"logging"`
 	Permissions PermissionsConfig `mapstructure:"permissions"`
 	AI          AIConfig          `mapstructure:"ai"`
@@ -187,6 +188,17 @@ type RadarrConfig struct {
 	NotifyOnImport bool   `mapstructure:"notify_on_import"`
 }
 
+// JellyfinConfig contains Jellyfin integration settings.
+type JellyfinConfig struct {
+	Enabled            bool   `mapstructure:"enabled"`
+	URL                string `mapstructure:"url"`
+	APIKey             string `mapstructure:"api_key"`
+	NotifyOnImport     bool   `mapstructure:"notify_on_import"`
+	VerifyAfterRefresh bool   `mapstructure:"verify_after_refresh"`
+	PlaybackSafety     bool   `mapstructure:"playback_safety"`
+	WebhookSecret      string `mapstructure:"webhook_secret"`
+}
+
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
 	return &Config{
@@ -219,6 +231,15 @@ func DefaultConfig() *Config {
 			URL:            "",
 			APIKey:         "",
 			NotifyOnImport: true,
+		},
+		Jellyfin: JellyfinConfig{
+			Enabled:            false,
+			URL:                "",
+			APIKey:             "",
+			NotifyOnImport:     true,
+			VerifyAfterRefresh: false,
+			PlaybackSafety:     true,
+			WebhookSecret:      "",
 		},
 		AI: AIConfig{
 			Enabled:              false,
@@ -429,6 +450,32 @@ max_backups = %d
 		c.Logging.File,
 		c.Logging.MaxSizeMB,
 		c.Logging.MaxBackups,
+	)
+
+	// Append permissions if configured
+	base += fmt.Sprintf(`
+# ============================================================================
+# JELLYFIN INTEGRATION
+# Optional: Trigger Jellyfin refresh and receive webhook events
+# ============================================================================
+[jellyfin]
+enabled = %v
+url = "%s"
+api_key = "%s"
+notify_on_import = %v
+verify_after_refresh = %v
+playback_safety = %v
+
+# Shared secret for validating incoming webhooks (optional, leave empty to skip validation)
+webhook_secret = "%s"
+`,
+		c.Jellyfin.Enabled,
+		c.Jellyfin.URL,
+		c.Jellyfin.APIKey,
+		c.Jellyfin.NotifyOnImport,
+		c.Jellyfin.VerifyAfterRefresh,
+		c.Jellyfin.PlaybackSafety,
+		c.Jellyfin.WebhookSecret,
 	)
 
 	// Append permissions if configured
