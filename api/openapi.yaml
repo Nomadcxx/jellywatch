@@ -524,7 +524,7 @@ components:
           type: string
         type:
           type: string
-          enum: [sonarr, radarr, mediadownloader, custom]
+          enum: [sonarr, radarr, jellyfin, mediadownloader, custom]
         name:
           type: string
         enabled:

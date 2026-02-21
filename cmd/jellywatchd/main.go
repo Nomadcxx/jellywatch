@@ -150,7 +150,13 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		logger.Info("daemon", "Radarr integration enabled", logging.F("url", cfg.Radarr.URL))
 	}
 
+	var jellyfinClient *jellyfin.Client
 	if cfg.Jellyfin.Enabled && cfg.Jellyfin.APIKey != "" && cfg.Jellyfin.URL != "" {
+		jellyfinClient = jellyfin.NewClient(jellyfin.Config{
+			URL:     cfg.Jellyfin.URL,
+			APIKey:  cfg.Jellyfin.APIKey,
+			Timeout: 30 * time.Second,
+		})
 		notifyMgr.Register(notify.NewJellyfinNotifier(cfg.Jellyfin.URL, cfg.Jellyfin.APIKey, cfg.Jellyfin.NotifyOnImport))
 		logger.Info("daemon", "Jellyfin integration enabled", logging.F("url", cfg.Jellyfin.URL))
 	}
@@ -185,6 +191,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		FileMode:        fileMode,
 		DirMode:         dirMode,
 		SonarrClient:    sonarrClient,
+		JellyfinClient:  jellyfinClient,
 		ConfigDir:       configDir,
 		PlaybackLocks:   playbackLocks,
 		DeferredQueue:   deferredQueue,

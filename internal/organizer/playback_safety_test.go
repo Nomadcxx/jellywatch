@@ -1,10 +1,13 @@
 package organizer
 
 import (
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 )
@@ -50,6 +53,58 @@ func TestCheckPlaybackSafetyUnlocked(t *testing.T) {
 
 	if err := org.checkPlaybackSafety(sourcePath); err != nil {
 		t.Fatalf("expected no error for unlocked path, got %v", err)
+	}
+}
+
+func TestCheckPlaybackSafetyFallbackToAPI(t *testing.T) {
+	sourcePath := "/media/Movies/The Matrix (1999)/The Matrix (1999).mkv"
+	client := jellyfin.NewClient(jellyfin.Config{
+		URL:    "http://jellyfin.local",
+		APIKey: "k",
+		HTTPClient: &http.Client{
+			Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/Sessions" {
+					return jsonResponse(http.StatusOK, `[{"Id":"s1","UserName":"alice","DeviceName":"Living Room","NowPlayingItem":{"Path":"`+sourcePath+`"}}]`), nil
+				}
+				return jsonResponse(http.StatusNotFound, "not found"), nil
+			}),
+			Timeout: 2 * time.Second,
+		},
+	})
+
+	org, err := NewOrganizer([]string{"/library"}, WithJellyfinClient(client, true))
+	if err != nil {
+		t.Fatalf("NewOrganizer() error = %v", err)
+	}
+
+	err = org.checkPlaybackSafety(sourcePath)
+	if err == nil {
+		t.Fatalf("expected playback safety error from API fallback")
+	}
+	if !strings.Contains(err.Error(), "via API") {
+		t.Fatalf("expected API fallback context in error, got %v", err)
+	}
+}
+
+func TestCheckPlaybackSafetyFallbackAPIFailOpen(t *testing.T) {
+	client := jellyfin.NewClient(jellyfin.Config{
+		URL:    "http://jellyfin.local",
+		APIKey: "k",
+		HTTPClient: &http.Client{
+			Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				return jsonResponse(http.StatusInternalServerError, "error"), nil
+			}),
+			Timeout: 2 * time.Second,
+		},
+	})
+
+	org, err := NewOrganizer([]string{"/library"}, WithJellyfinClient(client, true))
+	if err != nil {
+		t.Fatalf("NewOrganizer() error = %v", err)
+	}
+
+	if err := org.checkPlaybackSafety("/media/Movies/The.Matrix.1999.mkv"); err != nil {
+		t.Fatalf("expected fail-open behavior on jellyfin API error, got %v", err)
 	}
 }
 
@@ -130,5 +185,19 @@ func TestOrganizeMovieTargetPathLockedQueuesDeferredOperation(t *testing.T) {
 	ops := queue.GetForPath(lockedTargetPath)
 	if len(ops) != 1 {
 		t.Fatalf("expected deferred op keyed by locked target path, got %d", len(ops))
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func jsonResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
 	}
 }

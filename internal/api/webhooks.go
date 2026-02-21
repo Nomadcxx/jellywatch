@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -44,18 +45,18 @@ func (s *Server) HandleJellyfinWebhook(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) validateWebhookSecret(r *http.Request) bool {
 	if s == nil || s.cfg == nil {
-		return true
+		return false
 	}
 	expected := strings.TrimSpace(s.cfg.Jellyfin.WebhookSecret)
 	if expected == "" {
-		return true
+		return false
 	}
 
 	provided := strings.TrimSpace(r.Header.Get("X-Jellywatch-Webhook-Secret"))
 	if provided == "" {
-		provided = strings.TrimSpace(r.URL.Query().Get("secret"))
+		return false
 	}
-	return provided == expected
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
 }
 
 func (s *Server) handlePlaybackStart(event jellyfin.WebhookEvent) {

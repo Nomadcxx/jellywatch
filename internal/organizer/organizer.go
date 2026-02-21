@@ -46,6 +46,7 @@ type Organizer struct {
 	fileMode       os.FileMode
 	dirMode        os.FileMode
 	sonarrClient   *sonarr.Client
+	jellyfinClient *jellyfin.Client
 	db             *database.MediaDB
 	syncService    *syncsvc.SyncService
 	playbackSafety bool
@@ -147,6 +148,14 @@ func WithSonarrClient(client *sonarr.Client) func(*Organizer) {
 	}
 }
 
+// WithJellyfinClient enables playback-safety fallback checks through the Jellyfin sessions API.
+func WithJellyfinClient(client *jellyfin.Client, playbackSafety bool) func(*Organizer) {
+	return func(o *Organizer) {
+		o.jellyfinClient = client
+		o.playbackSafety = playbackSafety
+	}
+}
+
 // WithDatabase sets the HOLDEN database for self-learning
 func WithDatabase(db *database.MediaDB) func(*Organizer) {
 	return func(o *Organizer) {
@@ -218,31 +227,47 @@ func (o *Organizer) checkPlaybackSafety(sourcePath string) error {
 }
 
 func (o *Organizer) checkPlaybackSafetyWithOp(sourcePath, opType, targetPath string) error {
-	if !o.playbackSafety || o.playbackLocks == nil {
+	if !o.playbackSafety {
 		return nil
 	}
 
-	lockedPath := sourcePath
-	locked, info := o.playbackLocks.IsLocked(sourcePath)
-	if !locked && strings.TrimSpace(targetPath) != "" {
-		if targetLocked, targetInfo := o.playbackLocks.IsLocked(targetPath); targetLocked {
-			lockedPath = targetPath
-			locked = true
-			info = targetInfo
+	if o.playbackLocks != nil {
+		lockedPath := sourcePath
+		locked, info := o.playbackLocks.IsLocked(sourcePath)
+		if !locked && strings.TrimSpace(targetPath) != "" {
+			if targetLocked, targetInfo := o.playbackLocks.IsLocked(targetPath); targetLocked {
+				lockedPath = targetPath
+				locked = true
+				info = targetInfo
+			}
+		}
+
+		if locked && info != nil {
+			if o.deferredQueue != nil && opType != "" {
+				o.deferredQueue.Add(lockedPath, jellyfin.DeferredOp{
+					Type:       opType,
+					SourcePath: sourcePath,
+					TargetPath: targetPath,
+					Reason:     "blocked by active playback",
+					DeferredAt: time.Now(),
+				})
+			}
+			return fmt.Errorf("file is being streamed by %s on %s (via webhook), deferring operation", info.UserName, info.DeviceName)
 		}
 	}
 
-	if locked && info != nil {
-		if o.deferredQueue != nil && opType != "" {
-			o.deferredQueue.Add(lockedPath, jellyfin.DeferredOp{
-				Type:       opType,
-				SourcePath: sourcePath,
-				TargetPath: targetPath,
-				Reason:     "blocked by active playback",
-				DeferredAt: time.Now(),
-			})
+	// Fallback: query Jellyfin sessions API directly when webhook lock state is unavailable/incomplete.
+	if o.jellyfinClient != nil {
+		playing, session, err := o.jellyfinClient.IsPathBeingPlayed(sourcePath)
+		if err != nil {
+			return nil // fail-open on API issues
 		}
-		return fmt.Errorf("file is being streamed by %s on %s, deferring operation", info.UserName, info.DeviceName)
+		if playing && session != nil {
+			return fmt.Errorf("file is being streamed by %s on %s (via API), deferring operation", session.UserName, session.DeviceName)
+		}
+		if playing {
+			return fmt.Errorf("file is being actively streamed (via API), deferring operation")
+		}
 	}
 
 	return nil

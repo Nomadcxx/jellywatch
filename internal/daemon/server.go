@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -192,11 +193,11 @@ func (s *Server) handleJellyfinWebhook(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) validateWebhookSecret(r *http.Request) bool {
 	if s.webhookSecret == "" {
-		return true
+		return false
 	}
 	provided := strings.TrimSpace(r.Header.Get("X-Jellywatch-Webhook-Secret"))
 	if provided == "" {
-		provided = strings.TrimSpace(r.URL.Query().Get("secret"))
+		return false
 	}
-	return provided == s.webhookSecret
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(s.webhookSecret)) == 1
 }

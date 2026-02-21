@@ -466,7 +466,7 @@ notify_on_import = %v
 verify_after_refresh = %v
 playback_safety = %v
 
-# Shared secret for validating incoming webhooks (optional, leave empty to skip validation)
+# Shared secret for validating incoming webhooks (required when Jellyfin webhooks are enabled)
 webhook_secret = "%s"
 `,
 		c.Jellyfin.Enabled,

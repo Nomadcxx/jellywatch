@@ -205,10 +205,11 @@ func TestServerJellyfinWebhookPlaybackStartStop(t *testing.T) {
 		playbackLocks: jellyfin.NewPlaybackLockManager(),
 		deferredQueue: jellyfin.NewDeferredQueue(),
 	}
-	server := NewServer(handler, nil, ":0", nil, "")
+	server := NewServer(handler, nil, ":0", nil, "secret")
 
 	path := "/library/Movies/Movie (2025)/Movie (2025).mkv"
 	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewBufferString(`{"NotificationType":"PlaybackStart","ItemPath":"`+path+`","NotificationUsername":"u"}`))
+	startReq.Header.Set("X-Jellywatch-Webhook-Secret", "secret")
 	startW := httptest.NewRecorder()
 	server.handleJellyfinWebhook(startW, startReq)
 	if startW.Code != http.StatusOK {
@@ -221,6 +222,7 @@ func TestServerJellyfinWebhookPlaybackStartStop(t *testing.T) {
 	handler.deferredQueue.Add(path, jellyfin.DeferredOp{Type: "organize_movie", SourcePath: path})
 
 	stopReq := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/jellyfin", bytes.NewBufferString(`{"NotificationType":"PlaybackStop","ItemPath":"`+path+`"}`))
+	stopReq.Header.Set("X-Jellywatch-Webhook-Secret", "secret")
 	stopW := httptest.NewRecorder()
 	server.handleJellyfinWebhook(stopW, stopReq)
 	if stopW.Code != http.StatusOK {
