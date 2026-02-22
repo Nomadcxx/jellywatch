@@ -18,6 +18,7 @@ func (s *Server) HandleJellyfinWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var event jellyfin.WebhookEvent
 	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {

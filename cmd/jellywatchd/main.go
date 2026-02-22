@@ -12,6 +12,7 @@ import (
 
 	"github.com/Nomadcxx/jellywatch/internal/config"
 	"github.com/Nomadcxx/jellywatch/internal/daemon"
+	"github.com/Nomadcxx/jellywatch/internal/database"
 	"github.com/Nomadcxx/jellywatch/internal/jellyfin"
 	"github.com/Nomadcxx/jellywatch/internal/logging"
 	"github.com/Nomadcxx/jellywatch/internal/notify"
@@ -169,6 +170,12 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		logger.Info("daemon", "Jellyfin playback safety enabled")
 	}
 
+	db, err := database.Open()
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	defer db.Close()
+
 	// Get config directory for activity logging
 	configDir := filepath.Join(os.Getenv("HOME"), ".config", "jellywatch")
 	if cfgFile != "" {
@@ -192,6 +199,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		DirMode:         dirMode,
 		SonarrClient:    sonarrClient,
 		JellyfinClient:  jellyfinClient,
+		Database:        db,
 		ConfigDir:       configDir,
 		PlaybackLocks:   playbackLocks,
 		DeferredQueue:   deferredQueue,
