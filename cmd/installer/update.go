@@ -62,7 +62,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				"t": true, "T": true, "s": true, "S": true,
 				"p": true, "P": true, "r": true, "R": true,
 				"e": true, "E": true,
-				" ": true,
+				" ": true, "space": true,
 			}
 		case stepSystemService:
 			stepControlKeys = map[string]bool{
@@ -331,7 +331,7 @@ func (m model) handleAIKeys(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "tab", "shift+tab":
 		return m, nil
-	case " ":
+	case " ", "space":
 		if m.aiEnabled && m.aiState == aiStateReady && len(m.aiModels) > 0 {
 			idx := m.aiModelIndex
 			if idx >= 0 && idx < len(m.aiModels) {
