@@ -128,7 +128,7 @@ func TestSizeFilter(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if len(result.operations) > 0 {
+		if len(result) > 0 {
 			t.Error("Expected no operations for files under 100MB")
 		}
 	})
@@ -154,7 +154,7 @@ func TestSizeFilter(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if len(result.operations) == 0 {
+		if len(result) == 0 {
 			t.Error("Expected operations for files over 100MB")
 		}
 	})
@@ -180,7 +180,7 @@ func TestSizeFilter(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if len(result.operations) > 0 {
+		if len(result) > 0 {
 			t.Error("Expected no operations for files exactly 100MB")
 		}
 	})
